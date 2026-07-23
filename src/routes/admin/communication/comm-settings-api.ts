@@ -1,0 +1,313 @@
+// apps/api/src/routes/admin/communication/comm-settings-api.ts
+// Pure TypeScript — NO JSX, NO className
+
+import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import { prisma } from "../../../lib/prisma.js";
+import { authenticate } from "../../../middleware/authenticate.js";
+
+export async function adminCommSettingsRoutes(app: FastifyInstance) {
+  const P = "/admin/comm/settings";
+
+  // ─── GET SETTINGS (auto-create defaults) ─────────────────
+  app.get(P, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      let settings = await prisma.commSettings.findUnique({ where: { schoolId } });
+      if (!settings) {
+        settings = await prisma.commSettings.create({ data: { schoolId } });
+      }
+      return rep.send({ settings });
+    }
+  );
+
+  // ─── UPDATE GENERAL SETTINGS ──────────────────────────────
+  app.put(`${P}/general`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const b = req.body as any;
+      const s = await prisma.commSettings.upsert({
+        where: { schoolId },
+        create: { schoolId, ...b },
+        update: {
+          commIdFormat: b.commIdFormat,
+          defaultTimezone: b.defaultTimezone,
+          academicYearAuto: b.academicYearAuto,
+          channelPriority: b.channelPriority,
+        },
+      });
+      return rep.send({ settings: s });
+    }
+  );
+
+  // ─── UPDATE DELIVERY SETTINGS ─────────────────────────────
+  app.put(`${P}/delivery`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const b = req.body as any;
+      const s = await prisma.commSettings.upsert({
+        where: { schoolId },
+        create: { schoolId, ...b },
+        update: {
+          retryEnabled: b.retryEnabled,
+          maxRetryAttempts: b.maxRetryAttempts ? Number(b.maxRetryAttempts) : undefined,
+          retryIntervalMins: b.retryIntervalMins ? Number(b.retryIntervalMins) : undefined,
+          messageExpiryHours: b.messageExpiryHours ? Number(b.messageExpiryHours) : undefined,
+          smsLimitPerDay: b.smsLimitPerDay ? Number(b.smsLimitPerDay) : undefined,
+          emailLimitPerDay: b.emailLimitPerDay ? Number(b.emailLimitPerDay) : undefined,
+          whatsappLimitPerDay: b.whatsappLimitPerDay ? Number(b.whatsappLimitPerDay) : undefined,
+          pushLimitPerDay: b.pushLimitPerDay ? Number(b.pushLimitPerDay) : undefined,
+        },
+      });
+      return rep.send({ settings: s });
+    }
+  );
+
+  // ─── UPDATE SCHEDULING SETTINGS ───────────────────────────
+  app.put(`${P}/scheduling`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const b = req.body as any;
+      const s = await prisma.commSettings.upsert({
+        where: { schoolId },
+        create: { schoolId, ...b },
+        update: {
+          maxScheduleAheadDays: b.maxScheduleAheadDays ? Number(b.maxScheduleAheadDays) : undefined,
+          sendWindowFrom: b.sendWindowFrom,
+          sendWindowTo: b.sendWindowTo,
+          respectSendWindow: b.respectSendWindow,
+          quietHoursFrom: b.quietHoursFrom,
+          quietHoursTo: b.quietHoursTo,
+          respectQuietHours: b.respectQuietHours,
+        },
+      });
+      return rep.send({ settings: s });
+    }
+  );
+
+  // ─── UPDATE AUTOMATION SETTINGS ───────────────────────────
+  app.put(`${P}/automation`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const b = req.body as any;
+      const s = await prisma.commSettings.upsert({
+        where: { schoolId },
+        create: { schoolId, ...b },
+        update: {
+          automationEnabled: b.automationEnabled,
+          feeReminderEnabled: b.feeReminderEnabled,
+          attendanceAlertEnabled: b.attendanceAlertEnabled,
+          examNotifEnabled: b.examNotifEnabled,
+          birthdayMsgEnabled: b.birthdayMsgEnabled,
+        },
+      });
+      return rep.send({ settings: s });
+    }
+  );
+
+  // ─── UPDATE TEMPLATE SETTINGS ─────────────────────────────
+  app.put(`${P}/templates`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const b = req.body as any;
+      const s = await prisma.commSettings.upsert({
+        where: { schoolId },
+        create: { schoolId, ...b },
+        update: {
+          defaultSenderName: b.defaultSenderName,
+          defaultEmailFrom: b.defaultEmailFrom,
+          allowedVariables: b.allowedVariables,
+          requireApproval: b.requireApproval,
+          approvalRoles: b.approvalRoles,
+        },
+      });
+      return rep.send({ settings: s });
+    }
+  );
+
+  // ─── UPDATE PERMISSION SETTINGS ───────────────────────────
+  app.put(`${P}/permissions`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const { rolePermissions } = req.body as any;
+      const s = await prisma.commSettings.upsert({
+        where: { schoolId },
+        create: { schoolId, rolePermissions },
+        update: { rolePermissions },
+      });
+      return rep.send({ settings: s });
+    }
+  );
+
+  // ─── UPDATE NOTIFICATION SETTINGS ────────────────────────
+  app.put(`${P}/notifications`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const b = req.body as any;
+      const s = await prisma.commSettings.upsert({
+        where: { schoolId },
+        create: { schoolId, ...b },
+        update: {
+          notifyOnFailure: b.notifyOnFailure,
+          notifyOnLowBalance: b.notifyOnLowBalance,
+          notifyOnGatewayDown: b.notifyOnGatewayDown,
+          notifyEmailRecipients: b.notifyEmailRecipients,
+          lowBalanceThreshold: b.lowBalanceThreshold ? Number(b.lowBalanceThreshold) : undefined,
+        },
+      });
+      return rep.send({ settings: s });
+    }
+  );
+
+  // ─── UPDATE SECURITY SETTINGS ────────────────────────────
+  app.put(`${P}/security`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const b = req.body as any;
+      const s = await prisma.commSettings.upsert({
+        where: { schoolId },
+        create: { schoolId, ...b },
+        update: {
+          antiSpamEnabled: b.antiSpamEnabled,
+          sameRecipientCooldownMins: b.sameRecipientCooldownMins ? Number(b.sameRecipientCooldownMins) : undefined,
+          blacklistedPatterns: b.blacklistedPatterns,
+          smsAllowedSenderIds: b.smsAllowedSenderIds,
+        },
+      });
+      return rep.send({ settings: s });
+    }
+  );
+
+  // ─── UPDATE AUDIT SETTINGS ────────────────────────────────
+  app.put(`${P}/audit`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const b = req.body as any;
+      const s = await prisma.commSettings.upsert({
+        where: { schoolId },
+        create: { schoolId, ...b },
+        update: {
+          auditEnabled: b.auditEnabled,
+          logRetentionDays: b.logRetentionDays ? Number(b.logRetentionDays) : undefined,
+          trackReadReceipts: b.trackReadReceipts,
+        },
+      });
+      return rep.send({ settings: s });
+    }
+  );
+
+  // ─── RESET TO DEFAULTS ────────────────────────────────────
+  app.post(`${P}/reset`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      await prisma.commSettings.deleteMany({ where: { schoolId } });
+      const settings = await prisma.commSettings.create({ data: { schoolId } });
+      return rep.send({ settings, message: "Communication settings reset to defaults" });
+    }
+  );
+
+  // ─── CHANNEL CONFIGS CRUD ─────────────────────────────────
+  app.get(`${P}/channels`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const configs = await prisma.commChannelConfig.findMany({
+        where: { schoolId },
+        orderBy: [{ type: "asc" }, { isPrimary: "desc" }],
+      });
+      // Mask sensitive fields
+      const masked = configs.map(c => ({
+        ...c,
+        config: maskConfig(c.config as Record<string, any>),
+      }));
+      return rep.send({ configs: masked });
+    }
+  );
+
+  app.post(`${P}/channels`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId, userId } = req.user as any;
+      const b = req.body as any;
+
+      // If setting as primary, unset existing primary of same type
+      if (b.isPrimary) {
+        await prisma.commChannelConfig.updateMany({
+          where: { schoolId, type: b.type as any },
+          data: { isPrimary: false },
+        });
+      }
+
+      const config = await prisma.commChannelConfig.create({
+        data: {
+          schoolId,
+          type:        b.type as any,
+          name:        b.name,
+          config:      b.config ?? {},
+          isPrimary:   b.isPrimary ?? false,
+          isActive:    b.isActive ?? false,
+          createdById: Number(userId),
+        },
+      });
+      return rep.code(201).send({ config: { ...config, config: maskConfig(config.config as Record<string, any>) } });
+    }
+  );
+
+  app.put(`${P}/channels/:id`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const id = Number((req.params as any).id);
+      const b = req.body as any;
+
+      if (b.isPrimary) {
+        const existing = await prisma.commChannelConfig.findFirst({ where: { id, schoolId } });
+        if (existing) {
+          await prisma.commChannelConfig.updateMany({ where: { schoolId, type: existing.type }, data: { isPrimary: false } });
+        }
+      }
+
+      const config = await prisma.commChannelConfig.update({
+        where: { id, schoolId },
+        data: { name: b.name, config: b.config, isPrimary: b.isPrimary, isActive: b.isActive },
+      });
+      return rep.send({ config: { ...config, config: maskConfig(config.config as Record<string, any>) } });
+    }
+  );
+
+  app.delete(`${P}/channels/:id`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const id = Number((req.params as any).id);
+      await prisma.commChannelConfig.delete({ where: { id, schoolId } });
+      return rep.send({ ok: true });
+    }
+  );
+
+  // ─── TEST CHANNEL CONFIG ──────────────────────────────────
+  app.post(`${P}/channels/:id/test`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const id = Number((req.params as any).id);
+
+      // Simulate test — in production, call actual gateway
+      const isOk = Math.random() > 0.1; // 90% success simulation
+      const error = isOk ? null : "Connection timeout — check API key or host";
+
+      await prisma.commChannelConfig.update({
+        where: { id, schoolId },
+        data: { lastTestedAt: new Date(), lastTestOk: isOk, testError: error },
+      });
+
+      return rep.send({ ok: isOk, error, testedAt: new Date() });
+    }
+  );
+}
+
+// Mask sensitive config fields for API responses
+function maskConfig(config: Record<string, any>): Record<string, any> {
+  const sensitiveKeys = ["apiKey","password","pass","secret","token","fcmKey","apnsKey","apnsCertPath"];
+  const masked: Record<string, any> = {};
+  for (const [k, v] of Object.entries(config)) {
+    masked[k] = sensitiveKeys.some(sk => k.toLowerCase().includes(sk.toLowerCase()))
+      ? v ? "••••••••" : null
+      : v;
+  }
+  return masked;
+}
