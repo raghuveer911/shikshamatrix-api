@@ -322,7 +322,7 @@ export async function adminClassTimetableRoutes(app: FastifyInstance) {
     { preHandler: [authenticate] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { schoolId } = request.user as any;
-      const q = request.query as { teacherId: string; academicYear: string; dayOfWeek?: string };
+      const q = request.query as { teacherId: string; academicYear: string; dayOfWeek?: string; excludeClassId?: string };
 
       const slots = await prisma.periodSlot.findMany({
         where: {
@@ -330,6 +330,7 @@ export async function adminClassTimetableRoutes(app: FastifyInstance) {
           teacherId: parseInt(q.teacherId),
           academicYear: q.academicYear,
           ...(q.dayOfWeek ? { dayOfWeek: parseInt(q.dayOfWeek) } : {}),
+          ...(q.excludeClassId ? { classId: { not: parseInt(q.excludeClassId) } } : {}),
         },
         include: { class: { select: { name: true } } },
       });
