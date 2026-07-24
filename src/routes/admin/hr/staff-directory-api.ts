@@ -167,7 +167,7 @@ export async function adminStaffDirectoryRoutes(app: FastifyInstance) {
       const existingEmail = await prisma.user.findFirst({
       where: {email: body.email.trim().toLowerCase(),},});
       if (existingEmail) {
-      return reply.status(409).send({uccess: false,message: "Staff with this email already exists.",});}}
+      return reply.status(409).send({success: false,message: "Staff with this email already exists.",});}}
 
       if (body.aadhaarNumber) {
         const existingAadhaar = await prisma.staff.findFirst({
@@ -285,6 +285,33 @@ export async function adminStaffDirectoryRoutes(app: FastifyInstance) {
         }
       });
       return reply.send({ success: true, message: "Profile updated." });
+    }
+  );
+
+  // ─── RESET PASSWORD ─────────────────────────────────────────
+  // School admin can set a specific new password directly, or reset it
+  // back to the default (the staff member's phone number) with one click.
+  app.post("/admin/hr/staff/:id/reset-password", { preHandler: [authenticate, requireCapability('hr.staffCore')] },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const { id } = req.params as { id: string };
+      const body = req.body as { password?: string; useDefault?: boolean };
+
+      const profile = await prisma.staff.findFirst({ where: { id: parseInt(id), schoolId }, include: { user: true } });
+      if (!profile) return reply.status(404).send({ success: false, message: "Staff not found." });
+
+      const newPassword = body.useDefault ? profile.user.phone : body.password?.trim();
+      if (!newPassword || newPassword.length < 4) {
+        return reply.status(400).send({ success: false, message: "Password must be at least 4 characters." });
+      }
+
+      const hashed = await bcrypt.hash(newPassword, 10);
+      await prisma.user.update({ where: { id: profile.userId }, data: { passwordHash: hashed } });
+
+      return reply.send({
+        success: true,
+        message: body.useDefault ? "Password reset to phone number." : "Password updated successfully.",
+      });
     }
   );
 
