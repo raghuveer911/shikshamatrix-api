@@ -32,11 +32,11 @@ export async function adminHostelAllocationRoutes(app: FastifyInstance) {
     if (q.search) {
       where.OR = [
         { user: { name: { contains: q.search, mode: "insensitive" } } },
-        { admissionNo: { contains: q.search, mode: "insensitive" } },
+        { admissionNumber: { contains: q.search, mode: "insensitive" } },
       ];
     }
     if (q.classId) where.classId = Number(q.classId);
-    if (q.gender)  where.gender  = q.gender;
+    if (q.gender)  where.user = { ...(where.user ?? {}), gender: q.gender };
     // Exclude already-allocated
     if (q.excludeAllocated === "true") {
       const allocated = await prisma.hostelAllocation.findMany({ where: { schoolId, status: "ACTIVE" }, select: { studentId: true } });
