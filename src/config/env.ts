@@ -28,6 +28,11 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().optional(),
   SMTP_SECURE: z.coerce.boolean().default(false),
+  R2_ACCOUNT_ID: z.string().optional(),
+  R2_ACCESS_KEY_ID: z.string().optional(),
+  R2_SECRET_ACCESS_KEY: z.string().optional(),
+  R2_BUCKET_NAME: z.string().optional(),
+  R2_ENDPOINT: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -43,5 +48,6 @@ export const env = parsed.data;
 export const isRazorpayConfigured = !!(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET);
 export const isSmtpConfigured = !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS);
 export const isGroqConfigured = !!env.GROQ_API_KEY;
+export const isR2Configured = !!(env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.R2_BUCKET_NAME);
 
 export const corsOrigins = env.CORS_ORIGINS.split(",").map((o) => o.trim());

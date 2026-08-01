@@ -1,10 +1,12 @@
 import Fastify, { FastifyError, FastifyRequest, FastifyReply } from "fastify";
+import multipart from "@fastify/multipart";
 import { env, isGroqConfigured } from "./config/env.js";
 import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
 import { registerCors } from "./plugins/cors.js";
 import { registerSecurity } from "./plugins/security.js";
 import { registerJwt } from "./plugins/jwt.js";
+import { uploadRoutes } from "./routes/uploads.js";
 import { healthRoutes } from "./routes/health.js";
 import { loginRoutes } from "./routes/auth/login.js";
 import { meRoutes } from "./routes/auth/me.js";
@@ -247,8 +249,12 @@ async function buildApp() {
   await registerCors(app);
   await registerSecurity(app);
   await registerJwt(app);
+  await app.register(multipart, {
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB hard ceiling at the plugin level; upload.service enforces tighter per-type limits
+  });
 
   // Routes
+  await app.register(uploadRoutes);
   await app.register(profileRoutes);
   await app.register(profileDocumentsRoutes);
   await app.register(profilePerformanceRoutes);

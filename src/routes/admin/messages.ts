@@ -219,7 +219,7 @@ export async function adminMessageRoutes(app: FastifyInstance) {
         replyToId?: number;
       };
 
-      if (!body.content?.trim()) {
+      if (!body.content?.trim() && !body.fileUrl) {
         return reply.status(400).send({ success: false, message: "Message cannot be empty." });
       }
 
@@ -241,7 +241,7 @@ export async function adminMessageRoutes(app: FastifyInstance) {
         data: {
           conversationId: parseInt(id),
           senderId: userId,
-          content: body.content.trim(),
+          content: body.content?.trim() ?? "",
           type: body.type ?? "TEXT",
           fileUrl: body.fileUrl ?? null,
           fileName: body.fileName ?? null,
