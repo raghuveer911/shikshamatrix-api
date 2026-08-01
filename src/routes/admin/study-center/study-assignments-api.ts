@@ -35,7 +35,6 @@ export async function adminStudyAssignmentsRoutes(app: FastifyInstance) {
         orderBy: { createdAt: "desc" },
         take: 6,
         include: {
-          subject: { select: { name: true } },
           class:   { select: { name: true } },
           createdBy: { include: { user: { select: { name: true } } } },
           _count: { select: { submissions: true } },
@@ -61,7 +60,8 @@ export async function adminStudyAssignmentsRoutes(app: FastifyInstance) {
 
       const where: any = { schoolId, isActive: true };
       if (q.classId)   where.classId   = Number(q.classId);
-      if (q.subjectId) where.subjectId = Number(q.subjectId);
+      if (q.classNumber) where.classNumber = q.classNumber;
+      if (q.subjectName) where.subjectName = q.subjectName;
       if (q.chapterId) where.chapterId = Number(q.chapterId);
       if (q.type)      where.type      = q.type;
       if (q.isReusable === "true") where.isReusable = true;
@@ -72,7 +72,6 @@ export async function adminStudyAssignmentsRoutes(app: FastifyInstance) {
         prisma.studyAssignment.findMany({
           where,
           include: {
-            subject: { select: { name: true, code: true } },
             chapter: { select: { name: true } },
             class:   { select: { name: true } },
             createdBy: { include: { user: { select: { name: true, avatarUrl: true } } } },
@@ -98,7 +97,6 @@ export async function adminStudyAssignmentsRoutes(app: FastifyInstance) {
       const assignment = await prisma.studyAssignment.findFirst({
         where: { id, schoolId },
         include: {
-          subject: { select: { name: true } },
           chapter: { select: { name: true } },
           topic:   { select: { name: true } },
           class:   { select: { name: true } },
@@ -135,7 +133,8 @@ export async function adminStudyAssignmentsRoutes(app: FastifyInstance) {
           schoolId,
           createdById: staff.id,
           classId:    b.classId    ? Number(b.classId)    : null,
-          subjectId:  b.subjectId  ? Number(b.subjectId)  : null,
+          classNumber: b.classNumber ?? null,
+          subjectName: b.subjectName ?? null,
           chapterId:  b.chapterId  ? Number(b.chapterId)  : null,
           topicId:    b.topicId    ? Number(b.topicId)    : null,
           title:        b.title,
@@ -330,11 +329,11 @@ export async function adminStudyAssignmentsRoutes(app: FastifyInstance) {
           schoolId,
           isReusable: true,
           isActive: true,
-          ...(q.subjectId ? { subjectId: Number(q.subjectId) } : {}),
+          ...(q.classNumber ? { classNumber: q.classNumber } : {}),
+          ...(q.subjectName ? { subjectName: q.subjectName } : {}),
           ...(q.type ? { type: q.type as any } : {}),
         },
         include: {
-          subject: { select: { name: true } },
           chapter: { select: { name: true } },
           _count: { select: { submissions: true } },
         },
@@ -361,7 +360,8 @@ export async function adminStudyAssignmentsRoutes(app: FastifyInstance) {
           schoolId,
           createdById: staff?.id ?? src.createdById,
           classId:     b.classId  ? Number(b.classId) : src.classId,
-          subjectId:   src.subjectId,
+          classNumber: src.classNumber,
+          subjectName: src.subjectName,
           chapterId:   src.chapterId,
           title:       b.title ?? `${src.title} (Copy)`,
           instructions: src.instructions,
@@ -396,22 +396,18 @@ export async function adminStudyAssignmentsRoutes(app: FastifyInstance) {
           _count: { id: true },
         }),
         prisma.studyAssignment.groupBy({
-          by: ["subjectId"],
-          where: { schoolId, isActive: true },
+          by: ["subjectName"],
+          where: { schoolId, isActive: true, subjectName: { not: null } },
           _count: { id: true },
           orderBy: { _count: { id: "desc" } },
           take: 8,
         }),
       ]);
 
-      const subjectIds = submissionBySubject.map(s => s.subjectId).filter(Boolean) as number[];
-      const subjects   = await prisma.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true, name: true } });
-      const subjectMap = Object.fromEntries(subjects.map(s => [s.id, s.name]));
-
       return rep.send({
         submissionByStatus,
         submissionBySubject: submissionBySubject.map(s => ({
-          subjectId: s.subjectId, name: s.subjectId ? subjectMap[s.subjectId] ?? "?" : "?", count: s._count.id,
+          name: s.subjectName ?? "?", count: s._count.id,
         })),
       });
     }

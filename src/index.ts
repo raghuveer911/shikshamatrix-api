@@ -17,6 +17,7 @@ import { superAdminLoginRoutes } from "./routes/auth/superadmin-login.js";
 import { agentLoginRoutes } from "./routes/auth/agent-login.js";
 import { agentSelfServiceRoutes } from "./routes/agent/self-service.js";
 import { superAdminSchoolRoutes } from "./routes/superadmin/schools.js";
+import { superAdminStorageRoutes } from "./routes/superadmin/storage.js";
 import { superAdminAgentRoutes } from "./routes/superadmin/agents.js";
 import { superAdminAgentCommissionRoutes } from "./routes/superadmin/agent-commissions.js";
 import { superAdminAgentPayoutRoutes } from "./routes/superadmin/agent-payouts.js";
@@ -294,6 +295,7 @@ async function buildApp() {
   await app.register(academicsSyllabusRoutes);
   await app.register(registerSchoolRoutes);
   await app.register(superAdminSchoolRoutes);
+  await app.register(superAdminStorageRoutes);
   await app.register(superAdminAgentRoutes);
   await app.register(superAdminAgentCommissionRoutes);
   await app.register(superAdminAgentPayoutRoutes);

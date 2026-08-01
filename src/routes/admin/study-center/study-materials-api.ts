@@ -29,7 +29,6 @@ export async function adminStudyMaterialsRoutes(app: FastifyInstance) {
           orderBy: { createdAt: "desc" },
           take: 5,
           include: {
-            subject: { select: { name: true } },
             uploadedBy: { include: { user: { select: { name: true } } } },
           },
         }),
@@ -58,7 +57,8 @@ export async function adminStudyMaterialsRoutes(app: FastifyInstance) {
 
       const where: any = { schoolId, isArchived: false };
       if (q.classId)    where.classId   = Number(q.classId);
-      if (q.subjectId)  where.subjectId = Number(q.subjectId);
+      if (q.classNumber) where.classNumber = q.classNumber;
+      if (q.subjectName) where.subjectName = q.subjectName;
       if (q.chapterId)  where.chapterId = Number(q.chapterId);
       if (q.topicId)    where.topicId   = Number(q.topicId);
       if (q.type)       where.type      = q.type;
@@ -76,7 +76,6 @@ export async function adminStudyMaterialsRoutes(app: FastifyInstance) {
         prisma.studyMaterial.findMany({
           where,
           include: {
-            subject: { select: { name: true, code: true } },
             chapter: { select: { name: true, chapterNumber: true } },
             topic:   { select: { name: true } },
             class:   { select: { name: true } },
@@ -101,7 +100,6 @@ export async function adminStudyMaterialsRoutes(app: FastifyInstance) {
       const material = await prisma.studyMaterial.findFirst({
         where: { id, schoolId },
         include: {
-          subject: { select: { name: true } },
           chapter: { select: { name: true } },
           topic:   { select: { name: true } },
           class:   { select: { name: true } },
@@ -135,7 +133,8 @@ export async function adminStudyMaterialsRoutes(app: FastifyInstance) {
           schoolId,
           uploadedById: staff?.id ?? null,
           classId:    b.classId   ? Number(b.classId)   : null,
-          subjectId:  b.subjectId ? Number(b.subjectId) : null,
+          classNumber: b.classNumber ?? null,
+          subjectName: b.subjectName ?? null,
           chapterId:  b.chapterId ? Number(b.chapterId) : null,
           topicId:    b.topicId   ? Number(b.topicId)   : null,
           title:       b.title,
@@ -170,7 +169,8 @@ export async function adminStudyMaterialsRoutes(app: FastifyInstance) {
           type:        b.type as any,
           visibility:  b.visibility as any,
           classId:     b.classId   ? Number(b.classId)   : undefined,
-          subjectId:   b.subjectId ? Number(b.subjectId) : undefined,
+          classNumber: b.classNumber ?? undefined,
+          subjectName: b.subjectName ?? undefined,
           chapterId:   b.chapterId ? Number(b.chapterId) : undefined,
           topicId:     b.topicId   ? Number(b.topicId)   : undefined,
           fileUrl:     b.fileUrl,
@@ -241,13 +241,13 @@ export async function adminStudyMaterialsRoutes(app: FastifyInstance) {
     }
   );
 
-  // ─── SUBJECT RESOURCES (all materials for a subject) ──────
-  app.get(`${P}/by-subject/:subjectId`, { preHandler: [authenticate, requireCapability('studyCenter.core')] },
+  // ─── SUBJECT RESOURCES (all materials for a grade+subject) ─
+  app.get(`${P}/by-subject`, { preHandler: [authenticate, requireCapability('studyCenter.core')] },
     async (req: FastifyRequest, rep: FastifyReply) => {
       const { schoolId } = req.user as any;
-      const subjectId = Number((req.params as any).subjectId);
+      const q = req.query as any;
       const materials = await prisma.studyMaterial.findMany({
-        where: { schoolId, subjectId, isArchived: false },
+        where: { schoolId, classNumber: q.classNumber, subjectName: q.subjectName, isArchived: false },
         orderBy: [{ chapterId: "asc" }, { type: "asc" }, { createdAt: "desc" }],
         include: {
           chapter: { select: { name: true, chapterNumber: true } },
@@ -273,8 +273,8 @@ export async function adminStudyMaterialsRoutes(app: FastifyInstance) {
           orderBy: { _sum: { downloadCount: "desc" } },
         }),
         prisma.studyMaterial.groupBy({
-          by: ["subjectId"],
-          where: { schoolId, isArchived: false, subjectId: { not: null } },
+          by: ["subjectName"],
+          where: { schoolId, isArchived: false, subjectName: { not: null } },
           _count: { id: true },
           orderBy: { _count: { id: "desc" } },
           take: 8,
@@ -286,16 +286,9 @@ export async function adminStudyMaterialsRoutes(app: FastifyInstance) {
         }),
       ]);
 
-      const subjectIds = bySubject.map(s => s.subjectId).filter(Boolean) as number[];
-      const subjectNames = await prisma.subject.findMany({
-        where: { id: { in: subjectIds } },
-        select: { id: true, name: true },
-      });
-      const subjectMap = Object.fromEntries(subjectNames.map(s => [s.id, s.name]));
-
       return rep.send({
         byType,
-        bySubject: bySubject.map(s => ({ subjectId: s.subjectId, name: s.subjectId ? subjectMap[s.subjectId] ?? "?" : "?", count: s._count.id })),
+        bySubject: bySubject.map(s => ({ name: s.subjectName ?? "?", count: s._count.id })),
         byVisibility,
       });
     }

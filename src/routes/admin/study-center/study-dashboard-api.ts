@@ -57,22 +57,27 @@ export async function adminStudyDashboardRoutes(app: FastifyInstance) {
         })
       );
 
-      // Per-subject progress (top 8 subjects)
-      const subjects = await prisma.subject.findMany({
+      // Per-subject progress (top 8 grade+subject combos with curriculum defined)
+      const chapterCombos = await prisma.studyChapter.findMany({
         where: { schoolId, isActive: true },
-        select: { id: true, name: true, code: true },
+        distinct: ["classNumber", "subjectName"],
+        select: { classNumber: true, subjectName: true },
         take: 8,
       });
       const subjectProgress = await Promise.all(
-        subjects.map(async (sub) => {
+        chapterCombos.map(async (combo) => {
           const trackers = await prisma.studySyllabusTracker.findMany({
-            where: { schoolId, subjectId: sub.id, ...(academicYear ? { academicYear } : {}) },
+            where: {
+              schoolId,
+              ...(academicYear ? { academicYear } : {}),
+              topic: { chapter: { classNumber: combo.classNumber, subjectName: combo.subjectName } },
+            },
             select: { status: true },
           });
           const total = trackers.length;
           const done  = trackers.filter(t => t.status === "COMPLETED" || t.status === "REVISION").length;
-          const chapters = await prisma.studyChapter.count({ where: { schoolId, subjectId: sub.id, isActive: true } });
-          return { subjectId: sub.id, name: sub.name, code: sub.code, pct: total > 0 ? Math.round((done / total) * 100) : 0, chapters };
+          const chapters = await prisma.studyChapter.count({ where: { schoolId, classNumber: combo.classNumber, subjectName: combo.subjectName, isActive: true } });
+          return { classNumber: combo.classNumber, name: combo.subjectName, pct: total > 0 ? Math.round((done / total) * 100) : 0, chapters };
         })
       );
 
@@ -89,8 +94,7 @@ export async function adminStudyDashboardRoutes(app: FastifyInstance) {
         orderBy: { updatedAt: "desc" },
         take: 8,
         include: {
-          topic: { select: { name: true, chapter: { select: { name: true } } } },
-          subject: { select: { name: true } },
+          topic: { select: { name: true, chapter: { select: { name: true, subjectName: true } } } },
           staff: { include: { user: { select: { name: true } } } },
         },
       });

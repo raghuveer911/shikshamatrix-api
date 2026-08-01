@@ -3,10 +3,16 @@ import { prisma } from "../lib/prisma.js";
 // Every table that stores an uploaded file's size, and how to read it.
 // Some store bytes (`fileSize`), some store kilobytes (`fileSizeKb`) —
 // normalized to bytes here so callers never have to think about units.
+//
+// Chat/messaging attachments (Message.fileSize, CommMessage.attachment)
+// are deliberately EXCLUDED — casual chat photos shouldn't eat into a
+// school's document storage plan. They still count toward the real R2
+// bucket usage (see getRealR2UsageBytes for the superadmin-facing total),
+// just not against any individual school's plan limit.
 async function sumBytes(schoolId: number) {
   const [
     examDocs, savedReports, financialDocs, staffDocs,
-    hrSavedReports, studyMaterials, libDigitalResources, messages,
+    hrSavedReports, studyMaterials, libDigitalResources,
   ] = await Promise.all([
     prisma.examDocument.aggregate({ where: { schoolId }, _sum: { fileSize: true } }),
     prisma.savedReport.aggregate({ where: { schoolId }, _sum: { fileSize: true } }),
@@ -15,11 +21,9 @@ async function sumBytes(schoolId: number) {
     prisma.hrSavedReport.aggregate({ where: { schoolId }, _sum: { fileSizeKb: true } }),
     prisma.studyMaterial.aggregate({ where: { schoolId }, _sum: { fileSizeKb: true } }),
     prisma.libDigitalResource.aggregate({ where: { schoolId }, _sum: { fileSizeKb: true } }),
-    // Message has no schoolId of its own — scoped via its Conversation.
-    prisma.message.aggregate({ where: { conversation: { schoolId } }, _sum: { fileSize: true } }),
   ]);
 
-  const bytesFields = [examDocs._sum.fileSize, staffDocs._sum.fileSize, savedReports._sum.fileSize, messages._sum.fileSize];
+  const bytesFields = [examDocs._sum.fileSize, staffDocs._sum.fileSize, savedReports._sum.fileSize];
   const kbFields = [financialDocs._sum.fileSizeKb, hrSavedReports._sum.fileSizeKb, studyMaterials._sum.fileSizeKb, libDigitalResources._sum.fileSizeKb];
 
   const totalBytes = bytesFields.reduce((sum: number, v) => sum + (v ?? 0), 0);

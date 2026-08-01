@@ -120,7 +120,8 @@ export async function adminStudyCurriculumRoutes(app: FastifyInstance) {
           data: {
             schoolId,
             curriculumId: newCurriculum.id,
-            subjectId: chapter.subjectId,
+            classNumber: chapter.classNumber,
+            subjectName: chapter.subjectName,
             name: chapter.name,
             chapterNumber: chapter.chapterNumber,
             description: chapter.description,
@@ -172,15 +173,15 @@ export async function adminStudyCurriculumRoutes(app: FastifyInstance) {
         where: {
           schoolId,
           ...(q.curriculumId ? { curriculumId: Number(q.curriculumId) } : {}),
-          ...(q.subjectId ? { subjectId: Number(q.subjectId) } : {}),
+          ...(q.classNumber ? { classNumber: q.classNumber } : {}),
+          ...(q.subjectName ? { subjectName: q.subjectName } : {}),
           ...(q.importance ? { importance: q.importance as any } : {}),
           isActive: true,
         },
         include: {
-          subject: { select: { name: true, code: true, class: { select: { name: true } } } },
           _count: { select: { topics: true } },
         },
-        orderBy: [{ subjectId: "asc" }, { chapterNumber: "asc" }],
+        orderBy: [{ classNumber: "asc" }, { subjectName: "asc" }, { chapterNumber: "asc" }],
       });
       return rep.send({ chapters });
     }
@@ -194,7 +195,8 @@ export async function adminStudyCurriculumRoutes(app: FastifyInstance) {
         data: {
           schoolId,
           curriculumId: Number(b.curriculumId),
-          subjectId: Number(b.subjectId),
+          classNumber: String(b.classNumber),
+          subjectName: b.subjectName,
           name: b.name,
           chapterNumber: Number(b.chapterNumber ?? 1),
           description: b.description ?? null,
@@ -332,31 +334,35 @@ export async function adminStudyCurriculumRoutes(app: FastifyInstance) {
   // SYLLABUS TRACKING
   // ─────────────────────────────────────────────────────────
 
-  // Get tracker grid for subject × class × academicYear
+  // Get tracker grid for class × academicYear (subject comes from the topic's chapter)
   app.get(`${P}/tracking`, { preHandler: [authenticate, requireCapability('studyCenter.core')] },
     async (req: FastifyRequest, rep: FastifyReply) => {
       const { schoolId } = req.user as any;
       const q = req.query as any;
 
       const where: any = { schoolId };
-      if (q.subjectId)    where.subjectId    = Number(q.subjectId);
       if (q.classId)      where.classId      = Number(q.classId);
       if (q.staffId)      where.staffId      = Number(q.staffId);
       if (q.academicYear) where.academicYear = q.academicYear;
       if (q.status)       where.status       = q.status;
+      if (q.subjectName || q.classNumber) {
+        where.topic = { chapter: {
+          ...(q.subjectName ? { subjectName: q.subjectName } : {}),
+          ...(q.classNumber ? { classNumber: q.classNumber } : {}),
+        } };
+      }
 
       const trackers = await prisma.studySyllabusTracker.findMany({
         where,
         include: {
           topic: {
             include: {
-              chapter: { select: { name: true, chapterNumber: true, importance: true } },
+              chapter: { select: { name: true, chapterNumber: true, importance: true, classNumber: true, subjectName: true } },
             },
           },
-          subject: { select: { name: true, code: true } },
           staff: { include: { user: { select: { name: true, avatarUrl: true } } } },
         },
-        orderBy: [{ subjectId: "asc" }, { topic: { chapter: { chapterNumber: "asc" } } }, { topic: { topicNumber: "asc" } }],
+        orderBy: [{ topic: { chapter: { subjectName: "asc" } } }, { topic: { chapter: { chapterNumber: "asc" } } }, { topic: { topicNumber: "asc" } }],
       });
       return rep.send({ trackers });
     }
@@ -379,7 +385,6 @@ export async function adminStudyCurriculumRoutes(app: FastifyInstance) {
         },
         create: {
           schoolId,
-          subjectId:    Number(b.subjectId),
           topicId:      Number(b.topicId),
           staffId:      Number(b.staffId),
           classId:      Number(b.classId),
@@ -421,7 +426,6 @@ export async function adminStudyCurriculumRoutes(app: FastifyInstance) {
           },
           create: {
             schoolId,
-            subjectId: Number(b.subjectId),
             topicId:   Number(b.topicId),
             staffId:   Number(b.staffId),
             classId:   Number(b.classId),

@@ -34,7 +34,6 @@ export async function adminStudyLessonPlansRoutes(app: FastifyInstance) {
         orderBy: { updatedAt: "desc" },
         take: 6,
         include: {
-          subject: { select: { name: true } },
           chapter: { select: { name: true } },
           staff:   { include: { user: { select: { name: true } } } },
         },
@@ -55,7 +54,8 @@ export async function adminStudyLessonPlansRoutes(app: FastifyInstance) {
       const where: any = { schoolId };
       if (q.staffId)       where.staffId       = Number(q.staffId);
       if (q.classId)       where.classId       = Number(q.classId);
-      if (q.subjectId)     where.subjectId     = Number(q.subjectId);
+      if (q.classNumber)   where.classNumber   = q.classNumber;
+      if (q.subjectName)   where.subjectName   = q.subjectName;
       if (q.chapterId)     where.chapterId     = Number(q.chapterId);
       if (q.status)        where.status        = q.status;
       if (q.approvalStatus) where.approvalStatus = q.approvalStatus;
@@ -68,7 +68,6 @@ export async function adminStudyLessonPlansRoutes(app: FastifyInstance) {
         prisma.studyLessonPlan.findMany({
           where,
           include: {
-            subject: { select: { name: true, code: true } },
             chapter: { select: { name: true, chapterNumber: true } },
             topic:   { select: { name: true } },
             class:   { select: { name: true } },
@@ -95,7 +94,6 @@ export async function adminStudyLessonPlansRoutes(app: FastifyInstance) {
       const plan = await prisma.studyLessonPlan.findFirst({
         where: { id, schoolId },
         include: {
-          subject: { select: { name: true } },
           chapter: { select: { name: true } },
           topic:   { select: { name: true } },
           class:   { select: { name: true } },
@@ -126,7 +124,8 @@ export async function adminStudyLessonPlansRoutes(app: FastifyInstance) {
           schoolId,
           staffId:    b.staffId    ? Number(b.staffId)    : staff.id,
           classId:    b.classId    ? Number(b.classId)    : null,
-          subjectId:  b.subjectId  ? Number(b.subjectId)  : null,
+          classNumber: b.classNumber ?? null,
+          subjectName: b.subjectName ?? null,
           chapterId:  b.chapterId  ? Number(b.chapterId)  : null,
           topicId:    b.topicId    ? Number(b.topicId)    : null,
           title:          b.title,
@@ -253,7 +252,8 @@ export async function adminStudyLessonPlansRoutes(app: FastifyInstance) {
           schoolId,
           staffId:        b.staffId ? Number(b.staffId) : src.staffId,
           classId:        b.classId ? Number(b.classId) : src.classId,
-          subjectId:      src.subjectId,
+          classNumber:    src.classNumber,
+          subjectName:    src.subjectName,
           chapterId:      src.chapterId,
           topicId:        src.topicId,
           title:          b.title ?? `${src.title} (Clone)`,
@@ -293,7 +293,6 @@ export async function adminStudyLessonPlansRoutes(app: FastifyInstance) {
       const plans = await prisma.studyLessonPlan.findMany({
         where: { schoolId, weekNumber, academicYear },
         include: {
-          subject: { select: { name: true } },
           chapter: { select: { name: true } },
           class:   { select: { name: true } },
           staff:   { include: { user: { select: { name: true } } } },
@@ -324,7 +323,6 @@ export async function adminStudyLessonPlansRoutes(app: FastifyInstance) {
       const plans = await prisma.studyLessonPlan.findMany({
         where: { schoolId, monthNumber, academicYear },
         include: {
-          subject: { select: { name: true } },
           chapter: { select: { name: true } },
           class:   { select: { name: true } },
           staff:   { include: { user: { select: { name: true } } } },

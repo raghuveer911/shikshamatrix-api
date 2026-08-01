@@ -3140,11 +3140,6 @@ model Subject {
   examDocuments      ExamDocument[]
   onlineExams        OnlineExam[]
   qbChapters         QBChapter[]
-  studyChapters      StudyChapter[]
-  syllabusTrackers   StudySyllabusTracker[]
-  studyMaterials     StudyMaterial[]
-  studyAssignments   StudyAssignment[]
-  studyLessonPlans   StudyLessonPlan[]
   LibBook            LibBook[]
   LibDigitalResource LibDigitalResource[]
 
@@ -8736,8 +8731,11 @@ model StudyChapter {
   school         School            @relation(fields: [schoolId], references: [id])
   curriculumId   Int
   curriculum     StudyCurriculum   @relation(fields: [curriculumId], references: [id])
-  subjectId      Int
-  subject        Subject           @relation(fields: [subjectId], references: [id])
+  // Grade-level, NOT tied to one class-section's Subject row — this is
+  // what lets "Class 5-A" and "Class 5-B" share the same curriculum for
+  // "Mathematics" instead of needing it duplicated per section.
+  classNumber    String            @db.VarChar(5)
+  subjectName    String            @db.VarChar(100)
   name           String            @db.VarChar(200)
   chapterNumber  Int               @default(1)
   description    String?           @db.VarChar(400)
@@ -8753,10 +8751,10 @@ model StudyChapter {
   assignments StudyAssignment[]
   lessonPlans StudyLessonPlan[]
 
-  @@unique([curriculumId, subjectId, chapterNumber])
+  @@unique([curriculumId, classNumber, subjectName, chapterNumber])
   @@index([schoolId])
   @@index([curriculumId])
-  @@index([subjectId])
+  @@index([schoolId, classNumber, subjectName])
   @@map("study_chapters")
 }
 
@@ -8818,13 +8816,11 @@ model StudySyllabusTracker {
   id           Int            @id @default(autoincrement())
   schoolId     Int
   school       School         @relation(fields: [schoolId], references: [id])
-  subjectId    Int
-  subject      Subject        @relation(fields: [subjectId], references: [id])
   topicId      Int
   topic        StudyTopic     @relation(fields: [topicId], references: [id])
   staffId      Int // teacher who is teaching this
   staff        Staff          @relation(fields: [staffId], references: [id])
-  classId      Int // which class section
+  classId      Int // which class section — progress is always tracked per-section
   academicYear String         @db.VarChar(20)
   status       SyllabusStatus @default(NOT_STARTED)
   progressPct  Int            @default(0) // 0-100
@@ -8835,7 +8831,6 @@ model StudySyllabusTracker {
 
   @@unique([topicId, staffId, classId, academicYear])
   @@index([schoolId])
-  @@index([subjectId])
   @@index([staffId])
   @@index([classId])
   @@map("study_syllabus_trackers")
@@ -8847,11 +8842,14 @@ model StudyMaterial {
   school        School                  @relation(fields: [schoolId], references: [id])
   uploadedById  Int?
   uploadedBy    Staff?                  @relation("MaterialUploader", fields: [uploadedById], references: [id])
-  // Academic mapping (all optional — material can be school-wide)
+  // Academic mapping (all optional — material can be school-wide).
+  // classId = pin to ONE specific section only (rare — e.g. a note just
+  // for "5-A"). classNumber+subjectName = grade-level, visible to every
+  // section teaching that subject (the common case).
   classId       Int?
   class         Class?                  @relation(fields: [classId], references: [id])
-  subjectId     Int?
-  subject       Subject?                @relation(fields: [subjectId], references: [id])
+  classNumber   String?                 @db.VarChar(5)
+  subjectName   String?                 @db.VarChar(100)
   chapterId     Int?
   chapter       StudyChapter?           @relation(fields: [chapterId], references: [id])
   topicId       Int?
@@ -8884,7 +8882,7 @@ model StudyMaterial {
 
   @@index([schoolId])
   @@index([schoolId, type])
-  @@index([schoolId, subjectId])
+  @@index([schoolId, classNumber, subjectName])
   @@index([schoolId, chapterId])
   @@index([schoolId, classId])
   @@index([schoolId, isArchived])
@@ -8900,11 +8898,11 @@ model StudyAssignment {
   school       School              @relation(fields: [schoolId], references: [id])
   createdById  Int
   createdBy    Staff               @relation(fields: [createdById], references: [id])
-  // Academic mapping
+  // Academic mapping — see StudyMaterial's comment on classId vs classNumber
   classId      Int?
   class        Class?              @relation(fields: [classId], references: [id])
-  subjectId    Int?
-  subject      Subject?            @relation(fields: [subjectId], references: [id])
+  classNumber  String?             @db.VarChar(5)
+  subjectName  String?             @db.VarChar(100)
   chapterId    Int?
   chapter      StudyChapter?       @relation(fields: [chapterId], references: [id])
   topicId      Int?
@@ -8926,7 +8924,7 @@ model StudyAssignment {
 
   @@index([schoolId])
   @@index([schoolId, classId])
-  @@index([schoolId, subjectId])
+  @@index([schoolId, classNumber, subjectName])
   @@index([schoolId, isReusable])
   @@index([schoolId, type])
   @@map("study_assignments")
@@ -8983,11 +8981,11 @@ model StudyLessonPlan {
   school         School                    @relation(fields: [schoolId], references: [id])
   staffId        Int
   staff          Staff                     @relation(fields: [staffId], references: [id])
-  // Academic mapping
+  // Academic mapping — see StudyMaterial's comment on classId vs classNumber
   classId        Int?
   class          Class?                    @relation(fields: [classId], references: [id])
-  subjectId      Int?
-  subject        Subject?                  @relation(fields: [subjectId], references: [id])
+  classNumber    String?                   @db.VarChar(5)
+  subjectName    String?                   @db.VarChar(100)
   chapterId      Int?
   chapter        StudyChapter?             @relation(fields: [chapterId], references: [id])
   topicId        Int?
@@ -9019,7 +9017,7 @@ model StudyLessonPlan {
 
   @@index([schoolId])
   @@index([schoolId, staffId])
-  @@index([schoolId, subjectId])
+  @@index([schoolId, classNumber, subjectName])
   @@index([schoolId, academicYear])
   @@index([schoolId, weekNumber])
   @@index([schoolId, approvalStatus])
