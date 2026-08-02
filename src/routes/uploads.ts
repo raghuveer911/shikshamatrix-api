@@ -105,6 +105,12 @@ export async function uploadRoutes(app: FastifyInstance) {
         const object = await getObjectFromR2(key);
         reply.header("Content-Type", object.ContentType ?? "application/octet-stream");
         reply.header("Cache-Control", "public, max-age=86400"); // public assets can cache harder — a whole day
+        // Helmet defaults this to "same-origin" on every response, which
+        // blocks <img> tags on a different domain (the website) from
+        // loading this image even though the request itself succeeds —
+        // override it here since this route is meant to be embedded
+        // cross-origin by design.
+        reply.header("Cross-Origin-Resource-Policy", "cross-origin");
         return reply.send(object.Body);
       } catch (err) {
         return reply.status(404).send({ success: false, message: "File not found." });
