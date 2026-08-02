@@ -84,6 +84,8 @@ export async function uploadRoutes(app: FastifyInstance) {
         return reply.status(404).send({ success: false, message: "File not found." });
       }
     }
+  );
+
   // ── GET /public/files/* — NO auth. Public school-website images
   // (logo, hero/about, gallery, testimonials) need to load for anyone
   // visiting the public site — they're never logged in. Scoped so ONLY
