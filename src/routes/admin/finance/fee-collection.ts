@@ -119,6 +119,7 @@ export async function adminFeeCollectionRoutes(app: FastifyInstance) {
       const studentPlan = await safe("studentFeePlan lookup", () =>
         prisma.studentFeePlan.findFirst({
           where: { studentId: sid, schoolId, isActive: true, ...(currentYear ? { academicYearId: currentYear.id } : {}) },
+          orderBy: { assignedAt: "desc" },
           include: {
             plan: { select: { name: true } },
             installments: {

@@ -205,6 +205,15 @@ export async function adminFeeStructureRoutes(app: FastifyInstance) {
         const existing = await prisma.studentFeePlan.findFirst({ where: { studentId: student.id, planId: parseInt(id) } });
         if (existing) continue;
 
+        // A student should only ever have ONE active fee plan per academic
+        // year — deactivate any other active assignment first (e.g. an
+        // older/now-archived plan) so Collect Fees and the Student Ledger
+        // always resolve to the plan just assigned, not a stale one.
+        await prisma.studentFeePlan.updateMany({
+          where: { studentId: student.id, academicYearId, isActive: true, planId: { not: parseInt(id) } },
+          data: { isActive: false },
+        });
+
         const sfp = await prisma.studentFeePlan.create({ data: { schoolId, studentId: student.id, planId: parseInt(id), academicYearId, totalAmount: plan.totalAmount, paidAmount: 0, discountAmount: 0, fineAmount: 0, dueAmount: plan.totalAmount } });
 
         // Create installment records for this student
@@ -223,6 +232,9 @@ export async function adminFeeStructureRoutes(app: FastifyInstance) {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { schoolId } = req.user as any; const { id } = req.params as { id: string };
       await prisma.feePlan.updateMany({ where: { id: parseInt(id), schoolId }, data: { status: "ARCHIVED" } });
+      // A student shouldn't still show an active plan that's now archived
+      // just because they were never re-assigned to something new.
+      await prisma.studentFeePlan.updateMany({ where: { planId: parseInt(id), schoolId, isActive: true }, data: { isActive: false } });
       return reply.send({ success: true, message: "Plan archived." });
     }
   );

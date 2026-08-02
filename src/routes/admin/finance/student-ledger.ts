@@ -79,7 +79,7 @@ export async function adminStudentLedgerRoutes(app: FastifyInstance) {
         prisma.feeFine.findMany({ where: { studentId: sid, schoolId }, orderBy: { createdAt: "asc" } }),
         prisma.feeRefund.findMany({ where: { studentId: sid, schoolId }, orderBy: { createdAt: "asc" } }),
         prisma.carryForward.findMany({ where: { studentId: sid, schoolId }, include: { fromAcademicYear: { select: { name: true } }, toAcademicYear: { select: { name: true } } }, orderBy: { createdAt: "asc" } }),
-        prisma.studentFeePlan.findFirst({ where: { studentId: sid, schoolId }, include: { plan: { include: { heads: true } }, installments: { include: { installment: true }, orderBy: { installment: { installmentNo: "asc" } } } }, orderBy: { assignedAt: "desc" } }),
+        prisma.studentFeePlan.findFirst({ where: { studentId: sid, schoolId, isActive: true }, include: { plan: { include: { heads: true } }, installments: { include: { installment: true }, orderBy: { installment: { installmentNo: "asc" } } } }, orderBy: { assignedAt: "desc" } }),
       ]);
 
       const totalFee      = invoices.reduce((s,i) => s + Number(i.totalAmount), 0);
