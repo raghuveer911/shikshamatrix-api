@@ -202,17 +202,26 @@ export async function adminFeeStructureRoutes(app: FastifyInstance) {
       let assigned = 0;
 
       for (const student of students) {
-        const existing = await prisma.studentFeePlan.findFirst({ where: { studentId: student.id, planId: parseInt(id) } });
-        if (existing) continue;
-
         // A student should only ever have ONE active fee plan per academic
         // year — deactivate any other active assignment first (e.g. an
         // older/now-archived plan) so Collect Fees and the Student Ledger
         // always resolve to the plan just assigned, not a stale one.
+        // This must run BEFORE the "already has this plan" check below,
+        // otherwise re-running Assign for a plan that was tried before
+        // (already has a row) would silently skip fixing the old one.
         await prisma.studentFeePlan.updateMany({
           where: { studentId: student.id, academicYearId, isActive: true, planId: { not: parseInt(id) } },
           data: { isActive: false },
         });
+
+        const existing = await prisma.studentFeePlan.findFirst({ where: { studentId: student.id, planId: parseInt(id) } });
+        if (existing) {
+          if (!existing.isActive) {
+            await prisma.studentFeePlan.update({ where: { id: existing.id }, data: { isActive: true } });
+            assigned++;
+          }
+          continue;
+        }
 
         const sfp = await prisma.studentFeePlan.create({ data: { schoolId, studentId: student.id, planId: parseInt(id), academicYearId, totalAmount: plan.totalAmount, paidAmount: 0, discountAmount: 0, fineAmount: 0, dueAmount: plan.totalAmount } });
 
@@ -236,6 +245,49 @@ export async function adminFeeStructureRoutes(app: FastifyInstance) {
       // just because they were never re-assigned to something new.
       await prisma.studentFeePlan.updateMany({ where: { planId: parseInt(id), schoolId, isActive: true }, data: { isActive: false } });
       return reply.send({ success: true, message: "Plan archived." });
+    }
+  );
+
+  // ─── PURGE (hard-delete) an ARCHIVED plan ──────────────────
+  // Only allowed when NO payment was ever collected against it — a
+  // plan with real payment history must stay archived, never deleted,
+  // so receipts/ledgers/audit trails always resolve correctly.
+  app.delete("/admin/fee-plans/:id/purge", { preHandler: [authenticate, requireCapability('finance.collection')] },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const { schoolId } = req.user as any; const { id } = req.params as { id: string };
+      const planId = parseInt(id);
+
+      const plan = await prisma.feePlan.findFirst({ where: { id: planId, schoolId } });
+      if (!plan) return reply.status(404).send({ success: false, message: "Plan not found." });
+      if (plan.status !== "ARCHIVED") {
+        return reply.status(400).send({ success: false, message: "Archive the plan first before deleting it completely." });
+      }
+
+      const paidCount = await prisma.studentFeeInstallment.count({
+        where: { studentPlan: { planId }, paidAmount: { gt: 0 } },
+      });
+      if (paidCount > 0) {
+        return reply.status(409).send({
+          success: false,
+          message: `This plan has payment history (${paidCount} paid installment${paidCount > 1 ? "s" : ""}) — it can't be fully deleted, only archived, to keep receipts and ledgers accurate.`,
+        });
+      }
+
+      const affectedStudents = await prisma.studentFeePlan.count({ where: { planId, schoolId } });
+
+      await prisma.$transaction(async (tx) => {
+        // StudentFeeInstallment cascades automatically when its
+        // StudentFeePlan is deleted (see schema onDelete: Cascade).
+        await tx.studentFeePlan.deleteMany({ where: { planId, schoolId } });
+        // FeePlanHead / FeePlanInstallment cascade automatically when
+        // FeePlan itself is deleted.
+        await tx.feePlan.delete({ where: { id: planId } });
+      });
+
+      return reply.send({
+        success: true,
+        message: `Plan and ${affectedStudents} student assignment${affectedStudents === 1 ? "" : "s"} permanently deleted.`,
+      });
     }
   );
 
