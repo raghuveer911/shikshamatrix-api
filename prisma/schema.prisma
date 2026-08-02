@@ -2559,7 +2559,6 @@ model School {
   admissionSettings      AdmissionSettings?
   notifSettings          NotifSettings?
   websiteConfig          WebsiteConfig?
-  websitePages           WebsitePage[]
   tasks                  Task[]
   taskTemplates          TaskTemplate[]
   schoolSubscription     SchoolSubscription?
@@ -9058,6 +9057,7 @@ model CommNotice {
   targetUserIds  Int[] // when custom
   // Publishing
   isPinned       Boolean            @default(false)
+  showOnWebsite  Boolean            @default(false) // staff opts in — public school website shows only these
   publishAt      DateTime?
   expiresAt      DateTime?
   // Approval
@@ -9081,6 +9081,7 @@ model CommNotice {
   @@index([schoolId, category])
   @@index([schoolId, publishAt])
   @@index([schoolId, isPinned])
+  @@index([schoolId, showOnWebsite, status])
   @@map("comm_notices")
 }
 
@@ -11738,46 +11739,81 @@ model BiometricDevice {
 
 // ─── SCHOOL WEBSITE ──────────────────────────────────────────
 model WebsiteConfig {
-  id               Int      @id @default(autoincrement())
-  schoolId         Int      @unique
-  school           School   @relation(fields: [schoolId], references: [id])
-  isEnabled        Boolean  @default(false)
-  domain           String?  @db.VarChar(200)
-  theme            String   @default("DEFAULT") @db.VarChar(30)
-  primaryColor     String   @default("#6366f1") @db.VarChar(20)
-  showAbout        Boolean  @default(true)
-  showAdmissions   Boolean  @default(true)
-  showGallery      Boolean  @default(true)
-  showContact      Boolean  @default(true)
-  showNotices      Boolean  @default(true)
-  showTestimonials Boolean  @default(false)
-  enquiryEnabled   Boolean  @default(true)
-  enquiryEmail     String?  @db.VarChar(150)
-  metaTitle        String?  @db.VarChar(200)
-  metaDesc         String?  @db.VarChar(400)
-  updatedAt        DateTime @updatedAt
+  id        Int    @id @default(autoincrement())
+  schoolId  Int    @unique
+  school    School @relation(fields: [schoolId], references: [id])
+  isEnabled Boolean @default(false)
 
-  pages WebsitePage[]
+  // Domain — subdomain is auto-derived from school.slug (always works,
+  // zero setup). Custom domain is NOT implemented yet — the field is
+  // kept so the schema doesn't need another migration when it ships,
+  // but nothing reads/verifies it today; the admin UI should show
+  // "Coming soon" and not let anyone type into it.
+  customDomain String? @db.VarChar(200)
+
+  theme        String @default("DEFAULT") @db.VarChar(30)
+  primaryColor String @default("#6366f1") @db.VarChar(20)
+
+  // Hero
+  heroTagline  String? @db.VarChar(300)
+  heroImageUrl String? @db.VarChar(600)
+
+  // About (plain text, NOT HTML — rendered with line breaks preserved)
+  aboutText     String? @db.Text
+  aboutImageUrl String? @db.VarChar(600)
+
+  // Admissions
+  admissionsText  String? @db.Text
+  admissionsPhone String? @db.VarChar(20)
+  admissionsEmail String? @db.VarChar(150)
+
+  // Section toggles
+  showAbout        Boolean @default(true)
+  showAdmissions   Boolean @default(true)
+  showGallery      Boolean @default(true)
+  showContact      Boolean @default(true)
+  showNotices      Boolean @default(true)
+  showTestimonials Boolean @default(false)
+
+  enquiryEnabled Boolean @default(true)
+  enquiryEmail   String? @db.VarChar(150)
+
+  metaTitle String? @db.VarChar(200)
+  metaDesc  String? @db.VarChar(400)
+  updatedAt DateTime @updatedAt
+
+  galleryImages WebsiteGalleryImage[]
+  testimonials  WebsiteTestimonial[]
 
   @@map("website_configs")
 }
 
-model WebsitePage {
-  id          Int           @id @default(autoincrement())
-  configId    Int
-  config      WebsiteConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
-  slug        String        @db.VarChar(80)
-  title       String        @db.VarChar(150)
-  content     String?       @db.Text
-  isPublished Boolean       @default(false)
-  sortOrder   Int           @default(0)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  School      School?       @relation(fields: [schoolId], references: [id])
-  schoolId    Int?
+model WebsiteGalleryImage {
+  id        Int           @id @default(autoincrement())
+  configId  Int
+  config    WebsiteConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  imageUrl  String        @db.VarChar(600)
+  caption   String?       @db.VarChar(200)
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
 
-  @@unique([configId, slug])
-  @@map("website_pages")
+  @@index([configId])
+  @@map("website_gallery_images")
+}
+
+model WebsiteTestimonial {
+  id         Int           @id @default(autoincrement())
+  configId   Int
+  config     WebsiteConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  authorName String        @db.VarChar(150)
+  role       String?       @db.VarChar(100) // "Parent", "Class 10 Student", etc.
+  quote      String        @db.VarChar(500)
+  photoUrl   String?       @db.VarChar(600)
+  sortOrder  Int           @default(0)
+  createdAt  DateTime      @default(now())
+
+  @@index([configId])
+  @@map("website_testimonials")
 }
 
 model Task {

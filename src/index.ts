@@ -167,6 +167,7 @@ import { razorpayWebhookRoutes } from "./routes/webhooks/razorpay.js";
 import { registerSubscriptionCron } from "./jobs/subscriptionCron.js";
 import { adminBiometricRoutes }         from "./routes/admin/settings/settings-biometric-api.js";
 import { adminSchoolWebsiteRoutes }     from "./routes/admin/settings/settings-school-website-api.js";
+import { publicSchoolWebsiteRoutes }    from "./routes/public/school-website.js";
 import { adminDashboardRoutes } from "./routes/admin/dashboard-api.js";
 
 
@@ -490,6 +491,7 @@ async function buildApp() {
   await app.register(razorpayWebhookRoutes);
   await app.register(adminBiometricRoutes);
   await app.register(adminSchoolWebsiteRoutes);
+  await app.register(publicSchoolWebsiteRoutes);
   await app.register(adminDashboardRoutes);
   
   // Error handler
