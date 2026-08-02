@@ -47,6 +47,31 @@ export async function adminStudentAdmissionRoutes(app: FastifyInstance) {
     }
   );
 
+  // ── GET /admin/admissions/roll-numbers ─────────────────────
+  // Powers the roll-number picker on the admission form — shows what's
+  // already taken in this class so nobody has to guess-and-fail.
+  app.get("/admin/admissions/roll-numbers",
+    { preHandler: [authenticate, requireCapability('students.core')] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { schoolId } = request.user as any;
+      const { classId } = request.query as { classId?: string };
+      if (!classId) return reply.status(400).send({ success: false, message: "classId is required." });
+
+      const students = await prisma.student.findMany({
+        where: { schoolId, classId: parseInt(classId) },
+        select: { rollNumber: true, user: { select: { name: true } } },
+        orderBy: { rollNumber: "asc" },
+      });
+
+      const taken = students.map(s => ({ rollNumber: s.rollNumber, studentName: s.user.name }));
+      const takenNumeric = new Set(students.map(s => parseInt(s.rollNumber)).filter(n => !isNaN(n)));
+      let nextAvailable = 1;
+      while (takenNumeric.has(nextAvailable)) nextAvailable++;
+
+      return reply.send({ success: true, data: { taken, nextAvailable: String(nextAvailable) } });
+    }
+  );
+
   // ── POST /admin/admissions/check-duplicate ────────────────
   app.post("/admin/admissions/check-duplicate",
     { preHandler: [authenticate, requireCapability('students.core')] },
@@ -169,7 +194,9 @@ const [dupAdm, dupStudentPhone, dupRoll] = await Promise.all([
 
       const isDraft = body.isDraft ?? false;
 
-      const result = await prisma.$transaction(async (tx) => {
+      let result;
+      try {
+        result = await prisma.$transaction(async (tx) => {
 
         // 1. Create Student User with provided credentials
         const studentPasswordHash = await bcrypt.hash(creds.student.password, 10);
@@ -398,7 +425,48 @@ const [dupAdm, dupStudentPhone, dupRoll] = await Promise.all([
           parentUserId:    primaryParentUserId,
           admissionNumber: student.admissionNumber,
         };
-      });
+        });
+      } catch (err: any) {
+        // P2002 = unique constraint violation. Two admissions submitted
+        // at nearly the same moment can both pass the earlier duplicate
+        // check before either has committed — this is the real, final
+        // safety net, so the person always gets a clear message instead
+        // of a raw database error.
+        if (err?.code === "P2002") {
+          const fields: string[] = err?.meta?.target ?? [];
+          if (fields.includes("rollNumber")) {
+            return reply.status(409).send({
+              success: false,
+              message: `Roll Number ${body.academic.rollNumber} was just taken in this class — please choose another.`,
+              field: "rollNumber",
+            });
+          }
+          if (fields.includes("admissionNumber")) {
+            return reply.status(409).send({
+              success: false,
+              message: `Admission number ${body.academic.admissionNumber} was just taken — please refresh and try again.`,
+              field: "admissionNumber",
+            });
+          }
+          if (fields.includes("phone")) {
+            return reply.status(409).send({
+              success: false,
+              message: "This phone number was just registered by someone else — please use a different number.",
+              field: "phone",
+            });
+          }
+          return reply.status(409).send({
+            success: false,
+            message: "This record conflicts with an existing one — please review and try again.",
+          });
+        }
+
+        request.log.error({ err }, "Admission creation failed");
+        return reply.status(500).send({
+          success: false,
+          message: "Something went wrong while saving the admission. Please try again, and contact support if it keeps happening.",
+        });
+      }
 
       return reply.status(201).send({
         success: true,
