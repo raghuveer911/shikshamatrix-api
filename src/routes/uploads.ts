@@ -41,10 +41,16 @@ export async function uploadRoutes(app: FastifyInstance) {
       const key = buildObjectKey(schoolId, category, data.filename);
       await uploadBufferToR2(key, buffer, data.mimetype);
 
+      // school-website images AND the school's own logo/branding (used on
+      // the public site's navbar) need to load for anonymous visitors —
+      // everything else stays behind the authenticated /files/ route.
+      const PUBLIC_CATEGORIES = ["school-website", "school-branding"];
+      const urlPrefix = PUBLIC_CATEGORIES.includes(category) ? "/public/files/" : "/files/";
+
       return reply.send({
         success: true,
         data: {
-          url: `/files/${key}`,
+          url: `${urlPrefix}${key}`,
           name: data.filename,
           size: buffer.length,
           mimeType: data.mimetype,
@@ -73,6 +79,30 @@ export async function uploadRoutes(app: FastifyInstance) {
         const object = await getObjectFromR2(key);
         reply.header("Content-Type", object.ContentType ?? "application/octet-stream");
         reply.header("Cache-Control", "private, max-age=3600");
+        return reply.send(object.Body);
+      } catch (err) {
+        return reply.status(404).send({ success: false, message: "File not found." });
+      }
+    }
+  // ── GET /public/files/* — NO auth. Public school-website images
+  // (logo, hero/about, gallery, testimonials) need to load for anyone
+  // visiting the public site — they're never logged in. Scoped so ONLY
+  // objects uploaded under the "school-website" category are reachable
+  // this way; every other category (documents, chat, HR files, etc.)
+  // still requires the authenticated /files/* route above.
+  app.get(
+    "/public/files/*",
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const key = (request.params as any)["*"] as string;
+
+      if (!/^schools\/\d+\/(school-website|school-branding)\//.test(key)) {
+        return reply.status(403).send({ success: false, message: "Forbidden." });
+      }
+
+      try {
+        const object = await getObjectFromR2(key);
+        reply.header("Content-Type", object.ContentType ?? "application/octet-stream");
+        reply.header("Cache-Control", "public, max-age=86400"); // public assets can cache harder — a whole day
         return reply.send(object.Body);
       } catch (err) {
         return reply.status(404).send({ success: false, message: "File not found." });
