@@ -156,7 +156,7 @@ export async function tasksGenerateRoutes(app: FastifyInstance) {
       if (taskTypes.includes("FEE_COLLECTION_DUE")) {
         const overdueCount = await safe("studentFeeInstallment.count", () =>
           prisma.studentFeeInstallment.count({
-            where: { schoolId, status: "OVERDUE", dueDate: { lt: today } },
+            where: { schoolId, status: "OVERDUE", dueDate: { lt: today }, studentPlan: { isActive: true } },
           }), 0);
 
         if (overdueCount > 0) {

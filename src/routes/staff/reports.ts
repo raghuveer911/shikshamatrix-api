@@ -45,7 +45,7 @@ export async function staffReportsRoutes(app: FastifyInstance) {
         safe(async () => {
           const [monthAgg, dueAgg] = await Promise.all([
             prisma.feeReceipt.aggregate({ where: { schoolId, isVoid: false, createdAt: { gte: monthStart } }, _sum: { amount: true } }),
-            prisma.studentFeeInstallment.aggregate({ where: { schoolId, status: { in: ["PENDING", "PARTIAL", "OVERDUE"] } }, _sum: { dueAmount: true, paidAmount: true } }),
+            prisma.studentFeeInstallment.aggregate({ where: { schoolId, status: { in: ["PENDING", "PARTIAL", "OVERDUE"] }, studentPlan: { isActive: true } }, _sum: { dueAmount: true, paidAmount: true } }),
           ]);
           return {
             monthCollection: Number(monthAgg._sum.amount ?? 0),

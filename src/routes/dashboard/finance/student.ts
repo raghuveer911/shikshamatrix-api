@@ -149,6 +149,7 @@ export async function financeStudentRoutes(app: FastifyInstance) {
       const where: any = {
         schoolId,
         status: { in: ["PENDING", "OVERDUE", "PARTIAL"] },
+        studentPlan: { isActive: true },
         ...(classId ? {
           student: { classId: parseInt(classId) },
         } : {}),

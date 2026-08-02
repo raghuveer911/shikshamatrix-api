@@ -40,6 +40,7 @@ export async function financeOverviewRoutes(app: FastifyInstance) {
               where: {
                 schoolId,
                 status: { in: ["PENDING", "OVERDUE", "PARTIAL"] },
+                studentPlan: { isActive: true },
               },
               _sum: { dueAmount: true },
               _count: true,
@@ -49,6 +50,7 @@ export async function financeOverviewRoutes(app: FastifyInstance) {
                 schoolId,
                 status: "OVERDUE",
                 dueDate: { lt: todayStart },
+                studentPlan: { isActive: true },
               },
             }),
           ]);

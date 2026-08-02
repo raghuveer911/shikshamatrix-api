@@ -85,7 +85,7 @@ export async function parentDashboardRoutes(app: FastifyInstance) {
 
         safe("studentFeeInstallment.aggregate", () =>
           prisma.studentFeeInstallment.aggregate({
-            where: { studentId: sid, status: { in: ["PENDING", "OVERDUE", "PARTIAL"] } },
+            where: { studentId: sid, status: { in: ["PENDING", "OVERDUE", "PARTIAL"] }, studentPlan: { isActive: true } },
             _sum: { dueAmount: true }, _count: true,
           }), { _sum: { dueAmount: 0 }, _count: 0 } as any),
 

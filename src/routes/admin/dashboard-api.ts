@@ -42,7 +42,7 @@ export async function adminDashboardRoutes(app: FastifyInstance) {
         }), { _sum: { amount: null } } as any),
 
         safe(() => prisma.studentFeeInstallment.aggregate({
-          where: { schoolId, status: { in: ["PENDING", "PARTIAL", "OVERDUE"] } },
+          where: { schoolId, status: { in: ["PENDING", "PARTIAL", "OVERDUE"] }, studentPlan: { isActive: true } },
           _sum: { dueAmount: true, paidAmount: true, fineAmount: true, discountAmount: true },
         }), { _sum: { dueAmount: null, paidAmount: null, fineAmount: null, discountAmount: null } } as any),
 

@@ -31,11 +31,11 @@ export async function staffFinanceRoutes(app: FastifyInstance) {
           include: { student: { include: { user: { select: { name: true } } } } },
         }), [] as any[]),
         safe("dues", () => prisma.studentFeeInstallment.aggregate({
-          where: { schoolId, status: { in: ["PENDING", "PARTIAL", "OVERDUE"] } },
+          where: { schoolId, status: { in: ["PENDING", "PARTIAL", "OVERDUE"] }, studentPlan: { isActive: true } },
           _sum: { dueAmount: true, paidAmount: true, fineAmount: true, discountAmount: true }, _count: true,
         }), { _sum: { dueAmount: null, paidAmount: null, fineAmount: null, discountAmount: null }, _count: 0 } as any),
         safe("overdue", () => prisma.studentFeeInstallment.count({
-          where: { schoolId, status: { in: ["PENDING", "PARTIAL"] }, dueDate: { lt: now } },
+          where: { schoolId, status: { in: ["PENDING", "PARTIAL"] }, dueDate: { lt: now }, studentPlan: { isActive: true } },
         }), 0),
       ]);
 
@@ -119,8 +119,9 @@ export async function staffFinanceRoutes(app: FastifyInstance) {
 
       const where: any = { schoolId, status: { in: ["PENDING", "PARTIAL", "OVERDUE"] } };
       if (q.overdue === "true") where.dueDate = { lt: now };
-      if (q.classId || q.search) {
-        where.studentPlan = {
+      where.studentPlan = {
+        isActive: true,
+        ...(q.classId || q.search ? {
           student: {
             ...(q.classId ? { classId: parseInt(q.classId) } : {}),
             ...(q.search ? { OR: [
@@ -129,8 +130,8 @@ export async function staffFinanceRoutes(app: FastifyInstance) {
               { rollNumber: { contains: q.search, mode: "insensitive" } },
             ] } : {}),
           },
-        };
-      }
+        } : {}),
+      };
 
       const [installments, total] = await Promise.all([
         prisma.studentFeeInstallment.findMany({

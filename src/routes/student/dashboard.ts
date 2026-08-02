@@ -81,13 +81,13 @@ export async function studentDashboardRoutes(app: FastifyInstance) {
 
         safe("studentFeeInstallment.aggregate", () =>
           prisma.studentFeeInstallment.aggregate({
-            where: { studentId: student.id, status: { in: ["PENDING", "OVERDUE", "PARTIAL"] } },
+            where: { studentId: student.id, status: { in: ["PENDING", "OVERDUE", "PARTIAL"] }, studentPlan: { isActive: true } },
             _sum: { dueAmount: true }, _count: true,
           }), { _sum: { dueAmount: 0 }, _count: 0 } as any),
 
         safe("nextFeeInstallment", () =>
           prisma.studentFeeInstallment.findFirst({
-            where: { studentId: student.id, status: { in: ["PENDING", "OVERDUE", "PARTIAL"] } },
+            where: { studentId: student.id, status: { in: ["PENDING", "OVERDUE", "PARTIAL"] }, studentPlan: { isActive: true } },
             orderBy: { dueDate: "asc" },
             select: { dueDate: true, dueAmount: true },
           }), null),

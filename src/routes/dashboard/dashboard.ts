@@ -214,7 +214,7 @@ export async function staffDashboardRoutes(app: FastifyInstance) {
 
           const pendingDues = await safe("studentFeeInstallment.aggregate", () =>
             prisma.studentFeeInstallment.aggregate({
-              where: { schoolId, status: { in: ["PENDING","OVERDUE"] } },
+              where: { schoolId, status: { in: ["PENDING","OVERDUE"] }, studentPlan: { isActive: true } },
               _sum: { dueAmount: true },
             }), { _sum: { dueAmount: 0 } } as any);
 
