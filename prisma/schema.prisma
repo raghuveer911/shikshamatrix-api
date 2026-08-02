@@ -3131,7 +3131,6 @@ model Subject {
   name      String         @db.VarChar(100)
   code      String?        @db.VarChar(20)
   isActive  Boolean        @default(true)
-  questions QuestionBank[] @relation("QBSubject")
 
   periodSlots        PeriodSlot[]
   examSubjects       ExamSubject[]
@@ -3139,9 +3138,6 @@ model Subject {
   subjectRemarks     SubjectRemark[]
   examDocuments      ExamDocument[]
   onlineExams        OnlineExam[]
-  qbChapters         QBChapter[]
-  LibBook            LibBook[]
-  LibDigitalResource LibDigitalResource[]
 
   @@unique([schoolId, classId, name])
   @@index([schoolId])
@@ -4557,8 +4553,8 @@ model QBChapter {
   id           Int            @id @default(autoincrement())
   schoolId     Int
   school       School         @relation(fields: [schoolId], references: [id])
-  subjectId    Int
-  subject      Subject        @relation(fields: [subjectId], references: [id])
+  classNumber  String         @db.VarChar(10)
+  subjectName  String         @db.VarChar(100)
   name         String         @db.VarChar(200)
   serialNumber Int            @default(1)
   isActive     Boolean        @default(true)
@@ -4567,7 +4563,7 @@ model QBChapter {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
-  @@index([schoolId, subjectId])
+  @@index([schoolId, classNumber, subjectName])
   @@map("qb_chapters")
 }
 
@@ -4594,10 +4590,11 @@ model QuestionBank {
   schoolId Int
   school   School @relation(fields: [schoolId], references: [id])
 
-  // Step 1 — Classification
-  subjectId       Int
-  subject         Subject    @relation("QBSubject", fields: [subjectId], references: [id])
-  classNumber     String?    @db.VarChar(10) // "10", "11", "12"
+  // Step 1 — Classification (grade-level, NOT tied to one class-section's
+  // Subject row — this is what lets "Class 5-A" and "Class 5-B" share the
+  // same question bank for "Mathematics" instead of duplicating it).
+  classNumber     String     @db.VarChar(10) // "5", "10", "11", "12"
+  subjectName     String     @db.VarChar(100)
   chapterId       Int?
   chapter         QBChapter? @relation(fields: [chapterId], references: [id])
   topicId         Int?
@@ -4662,7 +4659,7 @@ model QuestionBank {
   updatedAt DateTime @updatedAt
 
   @@index([schoolId])
-  @@index([schoolId, subjectId])
+  @@index([schoolId, classNumber, subjectName])
   @@index([schoolId, status])
   @@index([schoolId, difficulty])
   @@index([schoolId, questionType])
@@ -9690,11 +9687,12 @@ model LibBook {
   author       LibAuthor?       @relation(fields: [authorId], references: [id])
   publisherId  Int?
   publisher    LibPublisher?    @relation(fields: [publisherId], references: [id])
-  // Academic mapping (optional)
+  // Academic mapping (optional). classId = pin to one specific section
+  // (rare). classNumber+subjectName = grade-level, matches every section.
   classId      Int?
   class        Class?           @relation(fields: [classId], references: [id])
-  subjectId    Int?
-  subject      Subject?         @relation(fields: [subjectId], references: [id])
+  classNumber  String?          @db.VarChar(10)
+  subjectName  String?          @db.VarChar(100)
   // Book details
   edition      String?          @db.VarChar(50)
   language     LibBookLanguage  @default(ENGLISH)
@@ -9936,11 +9934,12 @@ model LibDigitalResource {
   isbn            String?                @db.VarChar(30)
   edition         String?                @db.VarChar(50)
   language        String                 @default("English") @db.VarChar(30)
-  // Academic mapping
+  // Academic mapping. classId = pin to one specific section (rare).
+  // classNumber+subjectName = grade-level, matches every section.
   classId         Int?
   class           Class?                 @relation(fields: [classId], references: [id])
-  subjectId       Int?
-  subject         Subject?               @relation(fields: [subjectId], references: [id])
+  classNumber     String?                @db.VarChar(10)
+  subjectName     String?                @db.VarChar(100)
   // Content
   fileUrl         String?                @db.VarChar(800)
   thumbnailUrl    String?                @db.VarChar(600)

@@ -69,7 +69,8 @@ export async function adminLibDigitalLibraryRoutes(app: FastifyInstance) {
       const where: any = { schoolId, isActive: true };
       if (q.resourceType) where.resourceType = q.resourceType;
       if (q.classId)      where.classId      = Number(q.classId);
-      if (q.subjectId)    where.subjectId    = Number(q.subjectId);
+      if (q.subjectName)  where.subjectName  = q.subjectName;
+      if (q.classNumber)  where.classNumber  = q.classNumber;
       if (q.language)     where.language     = q.language;
       if (q.featured === "true") where.isFeatured = true;
       if (q.search) {
@@ -86,7 +87,6 @@ export async function adminLibDigitalLibraryRoutes(app: FastifyInstance) {
           where,
           include: {
             class:   { select: { name: true } },
-            subject: { select: { name: true } },
           },
           orderBy: q.sortBy === "popular" ? { viewCount: "desc" } : { createdAt: "desc" },
           skip: (page - 1) * limit,
@@ -108,7 +108,6 @@ export async function adminLibDigitalLibraryRoutes(app: FastifyInstance) {
         where: { id, schoolId },
         include: {
           class:   { select: { name: true } },
-          subject: { select: { name: true } },
           _count:  { select: { bookmarks: true, views: true } },
         },
       });
@@ -143,7 +142,8 @@ export async function adminLibDigitalLibraryRoutes(app: FastifyInstance) {
           edition:         b.edition ?? null,
           language:        b.language ?? "English",
           classId:         b.classId   ? Number(b.classId)   : null,
-          subjectId:       b.subjectId ? Number(b.subjectId) : null,
+          subjectName:     b.subjectName ?? null,
+          classNumber:     b.classNumber ?? null,
           fileUrl:         b.fileUrl   ?? null,
           thumbnailUrl:    b.thumbnailUrl ?? null,
           externalUrl:     b.externalUrl ?? null,
@@ -176,7 +176,8 @@ export async function adminLibDigitalLibraryRoutes(app: FastifyInstance) {
           author:       b.author, publisher: b.publisher, isbn: b.isbn, edition: b.edition,
           language:     b.language,
           classId:      b.classId   ? Number(b.classId)   : undefined,
-          subjectId:    b.subjectId ? Number(b.subjectId) : undefined,
+          subjectName:  b.subjectName ?? undefined,
+          classNumber:  b.classNumber ?? undefined,
           fileUrl:      b.fileUrl, thumbnailUrl: b.thumbnailUrl, externalUrl: b.externalUrl,
           fileSizeKb:   b.fileSizeKb ? Number(b.fileSizeKb) : undefined,
           totalPages:   b.totalPages ? Number(b.totalPages) : undefined,
@@ -330,7 +331,7 @@ export async function adminLibDigitalLibraryRoutes(app: FastifyInstance) {
               schoolId, studyMaterialId: m.id,
               title: m.title, description: m.description,
               resourceType: rtype as any,
-              classId:  m.classId,  subjectId: m.subjectId,
+              classId:  m.classId,  classNumber: m.classNumber, subjectName: m.subjectName,
               fileUrl:  m.fileUrl ?? null, thumbnailUrl: m.thumbnailUrl ?? null,
               externalUrl: m.externalUrl ?? null, fileSizeKb: m.fileSizeKb,
               tags: m.tags, createdById: Number(userId),

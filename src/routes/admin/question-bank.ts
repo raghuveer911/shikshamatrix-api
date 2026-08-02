@@ -11,11 +11,10 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { schoolId } = req.user as any;
 
-      const [subjects, staff, stats] = await Promise.all([
+      const [sectionSubjects, staff, stats] = await Promise.all([
         prisma.subject.findMany({
           where: { schoolId, isActive: true },
-          orderBy: { name: "asc" },
-          select: { id: true, name: true },
+          select: { name: true, class: { select: { classNumber: true } } },
         }),
         prisma.staff.findMany({
           where: { schoolId, isActive: true },
@@ -35,12 +34,20 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
         })(),
       ]);
 
+      // Distinct (classNumber, subjectName) combos — grade-level, shared
+      // across every section instead of one dropdown row per section.
+      const seen = new Map<string, { classNumber: string; subjectName: string }>();
+      for (const s of sectionSubjects) {
+        const key = `${s.class.classNumber}::${s.name}`;
+        if (!seen.has(key)) seen.set(key, { classNumber: s.class.classNumber, subjectName: s.name });
+      }
+      const subjects = [...seen.values()].sort((a, b) => Number(a.classNumber) - Number(b.classNumber) || a.subjectName.localeCompare(b.subjectName));
+
       // Chapters grouped by subject
       const chapters = await prisma.qBChapter.findMany({
         where: { schoolId, isActive: true },
-        orderBy: { serialNumber: "asc" },
+        orderBy: [{ classNumber: "asc" }, { subjectName: "asc" }, { serialNumber: "asc" }],
         include: {
-          subject: { select: { name: true } },
           topics: { where: { isActive: true }, orderBy: { serialNumber: "asc" } },
         },
       });
@@ -55,7 +62,7 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { schoolId } = req.user as any;
       const q = req.query as {
-        page?: string; search?: string; subjectId?: string;
+        page?: string; search?: string; subjectName?: string;
         chapterId?: string; topicId?: string; difficulty?: string;
         questionType?: string; status?: string; classNumber?: string;
         createdById?: string; boardType?: string; tags?: string;
@@ -65,7 +72,7 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
       const limit = 15;
       const where: any = { schoolId };
 
-      if (q.subjectId)    where.subjectId    = parseInt(q.subjectId);
+      if (q.subjectName)  where.subjectName  = q.subjectName;
       if (q.chapterId)    where.chapterId    = parseInt(q.chapterId);
       if (q.topicId)      where.topicId      = parseInt(q.topicId);
       if (q.difficulty)   where.difficulty   = q.difficulty;
@@ -87,7 +94,6 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
           where, skip: (page-1)*limit, take: limit,
           orderBy: { createdAt: "desc" },
           include: {
-            subject:   { select: { name: true } },
             chapter:   { select: { name: true } },
             topic:     { select: { name: true } },
             createdBy: { select: { name: true } },
@@ -114,7 +120,6 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
       const q = await prisma.questionBank.findFirst({
         where: { id: parseInt(id), schoolId },
         include: {
-          subject: { select: { id: true, name: true } },
           chapter: { select: { id: true, name: true } },
           topic:   { select: { id: true, name: true } },
           createdBy: { select: { name: true } },
@@ -133,7 +138,7 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { schoolId, userId } = req.user as any;
       const body = req.body as {
-        subjectId: number; classNumber?: string;
+        classNumber: string; subjectName: string;
         chapterId?: number; topicId?: number;
         learningOutcome?: string; tags?: string[]; boardType?: string;
         questionType: string;
@@ -147,15 +152,15 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
         source?: string;
       };
 
-      if (!body.questionText?.trim() || !body.subjectId || !body.questionType) {
-        return reply.status(400).send({ success: false, message: "questionText, subjectId and questionType required." });
+      if (!body.questionText?.trim() || !body.classNumber || !body.subjectName || !body.questionType) {
+        return reply.status(400).send({ success: false, message: "questionText, classNumber, subjectName and questionType required." });
       }
 
       const q = await prisma.questionBank.create({
         data: {
           schoolId, createdById: userId,
-          subjectId: body.subjectId,
-          classNumber: body.classNumber ?? null,
+          classNumber: body.classNumber,
+          subjectName: body.subjectName,
           chapterId: body.chapterId ?? null,
           topicId: body.topicId ?? null,
           learningOutcome: body.learningOutcome ?? null,
@@ -203,8 +208,8 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
       await prisma.questionBank.update({
         where: { id: parseInt(id) },
         data: {
-          ...(body.subjectId !== undefined       && { subjectId: body.subjectId }),
           ...(body.classNumber !== undefined     && { classNumber: body.classNumber }),
+          ...(body.subjectName !== undefined     && { subjectName: body.subjectName }),
           ...(body.chapterId !== undefined       && { chapterId: body.chapterId }),
           ...(body.topicId !== undefined         && { topicId: body.topicId }),
           ...(body.learningOutcome !== undefined && { learningOutcome: body.learningOutcome }),
@@ -269,7 +274,7 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
       const dup = await prisma.questionBank.create({
         data: {
           schoolId, createdById: userId,
-          subjectId: src.subjectId, classNumber: src.classNumber,
+          classNumber: src.classNumber, subjectName: src.subjectName,
           chapterId: src.chapterId, topicId: src.topicId,
           learningOutcome: src.learningOutcome, tags: src.tags, boardType: src.boardType,
           questionType: src.questionType,
@@ -311,7 +316,7 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { schoolId, userId } = req.user as any;
       const body = req.body as {
-        subjectId: number; classNumber?: string;
+        classNumber: string; subjectName: string;
         chapterId?: number; difficulty?: string;
         questions: {
           questionText: string; questionType?: string;
@@ -344,8 +349,8 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
       const created = await prisma.questionBank.createMany({
         data: valid.map(q => ({
           schoolId, createdById: userId,
-          subjectId: body.subjectId,
-          classNumber: body.classNumber ?? null,
+          classNumber: body.classNumber,
+          subjectName: body.subjectName,
           chapterId: body.chapterId ?? null,
           questionType: (q.questionType ?? "SINGLE_MCQ") as any,
           questionText: q.questionText.trim(),
@@ -373,25 +378,19 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
     { preHandler: [authenticate, requireCapability('onlineExams.questionBank')] },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { schoolId } = req.user as any;
-      const q = req.query as { subjectId?: string };
+      const q = req.query as { subjectName?: string };
 
       const where: any = { schoolId };
-      if (q.subjectId) where.subjectId = parseInt(q.subjectId);
+      if (q.subjectName) where.subjectName = q.subjectName;
 
       const [byDifficulty, byType, byStatus, bySubject, mostUsed, leastAccurate] = await Promise.all([
         prisma.questionBank.groupBy({ by: ["difficulty"], where, _count: true }),
         prisma.questionBank.groupBy({ by: ["questionType"], where, _count: true }),
         prisma.questionBank.groupBy({ by: ["status"], where, _count: true }),
-        prisma.questionBank.groupBy({ by: ["subjectId"], where: { schoolId }, _count: true }),
-        prisma.questionBank.findMany({ where: { ...where, usageCount: { gt: 0 } }, orderBy: { usageCount: "desc" }, take: 5, include: { subject: { select: { name: true } } } }),
-        prisma.questionBank.findMany({ where: { ...where, attemptCount: { gt: 5 } }, orderBy: { correctCount: "asc" }, take: 5, include: { subject: { select: { name: true } } } }),
+        prisma.questionBank.groupBy({ by: ["subjectName"], where: { schoolId }, _count: true }),
+        prisma.questionBank.findMany({ where: { ...where, usageCount: { gt: 0 } }, orderBy: { usageCount: "desc" }, take: 5 }),
+        prisma.questionBank.findMany({ where: { ...where, attemptCount: { gt: 5 } }, orderBy: { correctCount: "asc" }, take: 5 }),
       ]);
-
-      // Enrich subject names
-      const subjectIds = bySubject.map(b => b.subjectId);
-      const subjects = await prisma.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true, name: true } });
-      const subMap: Record<number,string> = {};
-      subjects.forEach(s => { subMap[s.id] = s.name; });
 
       return reply.send({
         success: true,
@@ -399,12 +398,12 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
           byDifficulty: byDifficulty.map(b => ({ difficulty: b.difficulty, count: b._count })),
           byType: byType.map(b => ({ type: b.questionType, count: b._count })),
           byStatus: byStatus.map(b => ({ status: b.status, count: b._count })),
-          bySubject: bySubject.map(b => ({ subjectId: b.subjectId, name: subMap[b.subjectId] ?? "?", count: b._count })),
-          mostUsed: mostUsed.map(q => ({ id: q.id, text: q.questionText.slice(0,80), usage: q.usageCount, subject: q.subject.name })),
+          bySubject: bySubject.map(b => ({ name: b.subjectName ?? "?", count: b._count })),
+          mostUsed: mostUsed.map(q => ({ id: q.id, text: q.questionText.slice(0,80), usage: q.usageCount, subject: q.subjectName })),
           leastAccurate: leastAccurate.map(q => ({
             id: q.id, text: q.questionText.slice(0,80),
             accuracy: q.attemptCount > 0 ? Math.round((q.correctCount/q.attemptCount)*100) : 0,
-            subject: q.subject.name,
+            subject: q.subjectName,
           })),
         },
       });
@@ -416,12 +415,11 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
     { preHandler: [authenticate, requireCapability('onlineExams.questionBank')] },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { schoolId } = req.user as any;
-      const { subjectId } = req.query as { subjectId?: string };
+      const { classNumber, subjectName } = req.query as { classNumber?: string; subjectName?: string };
       const chapters = await prisma.qBChapter.findMany({
-        where: { schoolId, isActive: true, ...(subjectId ? { subjectId: parseInt(subjectId) } : {}) },
-        orderBy: [{ subjectId: "asc" }, { serialNumber: "asc" }],
+        where: { schoolId, isActive: true, ...(classNumber ? { classNumber } : {}), ...(subjectName ? { subjectName } : {}) },
+        orderBy: [{ classNumber: "asc" }, { subjectName: "asc" }, { serialNumber: "asc" }],
         include: {
-          subject: { select: { name: true } },
           topics: { where: { isActive: true }, orderBy: { serialNumber: "asc" } },
           _count: { select: { questions: true } },
         },
@@ -434,9 +432,9 @@ export async function adminQuestionBankRoutes(app: FastifyInstance) {
     { preHandler: [authenticate, requireCapability('onlineExams.questionBank')] },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { schoolId } = req.user as any;
-      const { subjectId, name } = req.body as { subjectId: number; name: string };
-      const count = await prisma.qBChapter.count({ where: { schoolId, subjectId } });
-      const ch = await prisma.qBChapter.create({ data: { schoolId, subjectId, name: name.trim(), serialNumber: count+1 } });
+      const { classNumber, subjectName, name } = req.body as { classNumber: string; subjectName: string; name: string };
+      const count = await prisma.qBChapter.count({ where: { schoolId, classNumber, subjectName } });
+      const ch = await prisma.qBChapter.create({ data: { schoolId, classNumber, subjectName, name: name.trim(), serialNumber: count+1 } });
       return reply.status(201).send({ success: true, data: { chapter: ch } });
     }
   );
