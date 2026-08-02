@@ -32,6 +32,7 @@ export async function studentFeesStructureRoutes(app: FastifyInstance) {
       const studentPlan = await safe("studentFeePlan", () =>
         prisma.studentFeePlan.findFirst({
           where: { studentId: sid, schoolId, isActive: true },
+          orderBy: { assignedAt: "desc" },
           include: {
             plan: {
               select: {
@@ -71,6 +72,7 @@ export async function studentFeesStructureRoutes(app: FastifyInstance) {
       const studentPlan = await safe("studentFeePlan for dues", () =>
         prisma.studentFeePlan.findFirst({
           where: { studentId: sid, schoolId, isActive: true },
+          orderBy: { assignedAt: "desc" },
           include: {
             plan: { select: { name: true } },
             installments: { include: { installment: { select: { name: true, installmentNo: true } } }, orderBy: { dueDate: "asc" } },

@@ -70,6 +70,7 @@ export async function parentFeesRoutes(app: FastifyInstance) {
         safe("studentFeePlan.findFirst", () =>
           prisma.studentFeePlan.findFirst({
             where: { studentId: sid, isActive: true },
+            orderBy: { assignedAt: "desc" },
             include: {
               plan: { select: { name: true } },
               installments: { include: { installment: true }, orderBy: { dueDate: "asc" } },
