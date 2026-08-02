@@ -11767,13 +11767,35 @@ model WebsiteConfig {
   admissionsPhone String? @db.VarChar(20)
   admissionsEmail String? @db.VarChar(150)
 
+  // Principal's Message — a personal, trust-building touch
+  principalName    String? @db.VarChar(150)
+  principalMessage String? @db.Text
+  principalPhotoUrl String? @db.VarChar(600)
+
+  // Trust stat bar — 4 free-form stat/label pairs, e.g. "25+" / "Years of Excellence"
+  stat1Value String? @db.VarChar(20)
+  stat1Label String? @db.VarChar(60)
+  stat2Value String? @db.VarChar(20)
+  stat2Label String? @db.VarChar(60)
+  stat3Value String? @db.VarChar(20)
+  stat3Label String? @db.VarChar(60)
+  stat4Value String? @db.VarChar(20)
+  stat4Label String? @db.VarChar(60)
+
+  // Extra CTAs
+  brochureUrl    String? @db.VarChar(600) // PDF — "Download Brochure" button
+  virtualTourUrl String? @db.VarChar(600) // YouTube/video link — "Watch Video" button
+
   // Section toggles
-  showAbout        Boolean @default(true)
-  showAdmissions   Boolean @default(true)
-  showGallery      Boolean @default(true)
-  showContact      Boolean @default(true)
-  showNotices      Boolean @default(true)
-  showTestimonials Boolean @default(false)
+  showAbout            Boolean @default(true)
+  showAdmissions       Boolean @default(true)
+  showGallery          Boolean @default(true)
+  showContact          Boolean @default(true)
+  showNotices          Boolean @default(true)
+  showTestimonials     Boolean @default(false)
+  showPrincipalMessage Boolean @default(false)
+  showFacilities       Boolean @default(false)
+  showFAQs             Boolean @default(false)
 
   enquiryEnabled Boolean @default(true)
   enquiryEmail   String? @db.VarChar(150)
@@ -11784,6 +11806,8 @@ model WebsiteConfig {
 
   galleryImages WebsiteGalleryImage[]
   testimonials  WebsiteTestimonial[]
+  facilities    WebsiteFacility[]
+  faqs          WebsiteFAQ[]
 
   @@map("website_configs")
 }
@@ -11814,6 +11838,33 @@ model WebsiteTestimonial {
 
   @@index([configId])
   @@map("website_testimonials")
+}
+
+model WebsiteFacility {
+  id          Int           @id @default(autoincrement())
+  configId    Int
+  config      WebsiteConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  icon        String        @default("Building2") @db.VarChar(40) // a lucide-react icon name, picked from a fixed list in the admin UI
+  title       String        @db.VarChar(150)
+  description String?       @db.VarChar(300)
+  sortOrder   Int           @default(0)
+  createdAt   DateTime      @default(now())
+
+  @@index([configId])
+  @@map("website_facilities")
+}
+
+model WebsiteFAQ {
+  id        Int           @id @default(autoincrement())
+  configId  Int
+  config    WebsiteConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  question  String        @db.VarChar(300)
+  answer    String        @db.Text
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
+
+  @@index([configId])
+  @@map("website_faqs")
 }
 
 model Task {

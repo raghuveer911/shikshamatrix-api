@@ -14,12 +14,14 @@ export async function adminSchoolWebsiteRoutes(app: FastifyInstance) {
       include: {
         galleryImages: { orderBy: { sortOrder: "asc" } },
         testimonials: { orderBy: { sortOrder: "asc" } },
+        facilities: { orderBy: { sortOrder: "asc" } },
+        faqs: { orderBy: { sortOrder: "asc" } },
       },
     });
     if (!config) {
       config = await prisma.websiteConfig.create({
         data: { schoolId },
-        include: { galleryImages: true, testimonials: true },
+        include: { galleryImages: true, testimonials: true, facilities: true, faqs: true },
       });
     }
     const school = await prisma.school.findUnique({ where: { id: schoolId }, select: { slug: true } });
@@ -29,29 +31,25 @@ export async function adminSchoolWebsiteRoutes(app: FastifyInstance) {
   app.put(P, { preHandler: [authenticate] }, async (req: FastifyRequest, rep: FastifyReply) => {
     const { schoolId } = req.user as any;
     const b = req.body as any;
+    const fields = {
+      isEnabled: b.isEnabled, theme: b.theme, primaryColor: b.primaryColor,
+      heroTagline: b.heroTagline, heroImageUrl: b.heroImageUrl,
+      aboutText: b.aboutText, aboutImageUrl: b.aboutImageUrl,
+      admissionsText: b.admissionsText, admissionsPhone: b.admissionsPhone, admissionsEmail: b.admissionsEmail,
+      principalName: b.principalName, principalMessage: b.principalMessage, principalPhotoUrl: b.principalPhotoUrl,
+      stat1Value: b.stat1Value, stat1Label: b.stat1Label, stat2Value: b.stat2Value, stat2Label: b.stat2Label,
+      stat3Value: b.stat3Value, stat3Label: b.stat3Label, stat4Value: b.stat4Value, stat4Label: b.stat4Label,
+      brochureUrl: b.brochureUrl, virtualTourUrl: b.virtualTourUrl,
+      showAbout: b.showAbout, showAdmissions: b.showAdmissions, showGallery: b.showGallery,
+      showContact: b.showContact, showNotices: b.showNotices, showTestimonials: b.showTestimonials,
+      showPrincipalMessage: b.showPrincipalMessage, showFacilities: b.showFacilities, showFAQs: b.showFAQs,
+      enquiryEnabled: b.enquiryEnabled, enquiryEmail: b.enquiryEmail,
+      metaTitle: b.metaTitle, metaDesc: b.metaDesc,
+    };
     const config = await prisma.websiteConfig.upsert({
       where: { schoolId },
-      create: {
-        schoolId,
-        isEnabled: b.isEnabled, theme: b.theme, primaryColor: b.primaryColor,
-        heroTagline: b.heroTagline, heroImageUrl: b.heroImageUrl,
-        aboutText: b.aboutText, aboutImageUrl: b.aboutImageUrl,
-        admissionsText: b.admissionsText, admissionsPhone: b.admissionsPhone, admissionsEmail: b.admissionsEmail,
-        showAbout: b.showAbout, showAdmissions: b.showAdmissions, showGallery: b.showGallery,
-        showContact: b.showContact, showNotices: b.showNotices, showTestimonials: b.showTestimonials,
-        enquiryEnabled: b.enquiryEnabled, enquiryEmail: b.enquiryEmail,
-        metaTitle: b.metaTitle, metaDesc: b.metaDesc,
-      },
-      update: {
-        isEnabled: b.isEnabled, theme: b.theme, primaryColor: b.primaryColor,
-        heroTagline: b.heroTagline, heroImageUrl: b.heroImageUrl,
-        aboutText: b.aboutText, aboutImageUrl: b.aboutImageUrl,
-        admissionsText: b.admissionsText, admissionsPhone: b.admissionsPhone, admissionsEmail: b.admissionsEmail,
-        showAbout: b.showAbout, showAdmissions: b.showAdmissions, showGallery: b.showGallery,
-        showContact: b.showContact, showNotices: b.showNotices, showTestimonials: b.showTestimonials,
-        enquiryEnabled: b.enquiryEnabled, enquiryEmail: b.enquiryEmail,
-        metaTitle: b.metaTitle, metaDesc: b.metaDesc,
-      },
+      create: { schoolId, ...fields },
+      update: fields,
     });
     return rep.send({ config });
   });
@@ -101,6 +99,52 @@ export async function adminSchoolWebsiteRoutes(app: FastifyInstance) {
     const t = await prisma.websiteTestimonial.findFirst({ where: { id, config: { schoolId } } });
     if (!t) return rep.status(404).send({ success: false, message: "Not found." });
     await prisma.websiteTestimonial.delete({ where: { id } });
+    return rep.send({ success: true });
+  });
+
+  // ── Facilities ──────────────────────────────────────────
+  app.post(`${P}/facilities`, { preHandler: [authenticate] }, async (req: FastifyRequest, rep: FastifyReply) => {
+    const { schoolId } = req.user as any;
+    const b = req.body as { icon?: string; title: string; description?: string };
+    if (!b.title?.trim()) return rep.status(400).send({ success: false, message: "Title is required." });
+    let config = await prisma.websiteConfig.findUnique({ where: { schoolId } });
+    if (!config) config = await prisma.websiteConfig.create({ data: { schoolId } });
+    const count = await prisma.websiteFacility.count({ where: { configId: config.id } });
+    const f = await prisma.websiteFacility.create({
+      data: { configId: config.id, icon: b.icon ?? "Building2", title: b.title.trim(), description: b.description ?? null, sortOrder: count },
+    });
+    return rep.code(201).send({ facility: f });
+  });
+
+  app.delete(`${P}/facilities/:id`, { preHandler: [authenticate] }, async (req: FastifyRequest, rep: FastifyReply) => {
+    const { schoolId } = req.user as any;
+    const id = Number((req.params as any).id);
+    const f = await prisma.websiteFacility.findFirst({ where: { id, config: { schoolId } } });
+    if (!f) return rep.status(404).send({ success: false, message: "Not found." });
+    await prisma.websiteFacility.delete({ where: { id } });
+    return rep.send({ success: true });
+  });
+
+  // ── FAQs ────────────────────────────────────────────────
+  app.post(`${P}/faqs`, { preHandler: [authenticate] }, async (req: FastifyRequest, rep: FastifyReply) => {
+    const { schoolId } = req.user as any;
+    const b = req.body as { question: string; answer: string };
+    if (!b.question?.trim() || !b.answer?.trim()) return rep.status(400).send({ success: false, message: "Question and answer are required." });
+    let config = await prisma.websiteConfig.findUnique({ where: { schoolId } });
+    if (!config) config = await prisma.websiteConfig.create({ data: { schoolId } });
+    const count = await prisma.websiteFAQ.count({ where: { configId: config.id } });
+    const f = await prisma.websiteFAQ.create({
+      data: { configId: config.id, question: b.question.trim(), answer: b.answer.trim(), sortOrder: count },
+    });
+    return rep.code(201).send({ faq: f });
+  });
+
+  app.delete(`${P}/faqs/:id`, { preHandler: [authenticate] }, async (req: FastifyRequest, rep: FastifyReply) => {
+    const { schoolId } = req.user as any;
+    const id = Number((req.params as any).id);
+    const f = await prisma.websiteFAQ.findFirst({ where: { id, config: { schoolId } } });
+    if (!f) return rep.status(404).send({ success: false, message: "Not found." });
+    await prisma.websiteFAQ.delete({ where: { id } });
     return rep.send({ success: true });
   });
 }
