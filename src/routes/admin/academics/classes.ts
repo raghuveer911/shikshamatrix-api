@@ -93,15 +93,16 @@ export async function adminClassRoutes(app: FastifyInstance) {
 
       const classes = await prisma.class.findMany({
         where,
-        orderBy: [{ section: "asc" }],
+        orderBy: [{ sortOrder: "asc" }, { section: "asc" }],
         include: {
           classTeacher: {
             include: {
               user: { select: { name: true, avatarUrl: true } },
             },
           },
-          subjects: {
-            select: { id: true, name: true, code: true },
+          subjectAssignments: {
+            where: { isActive: true },
+            include: { subject: { select: { id: true, name: true, code: true } } },
           },
           _count: {
             select: { students: true, attendance: true },
@@ -162,8 +163,12 @@ export async function adminClassRoutes(app: FastifyInstance) {
               user: { select: { id: true, name: true, avatarUrl: true } },
             },
           },
-          subjects: {
-            select: { id: true, name: true, code: true, teacherId: true },
+          subjectAssignments: {
+            where: { isActive: true },
+            include: {
+              subject: { select: { id: true, name: true, code: true } },
+              teacher: { include: { user: { select: { name: true } } } },
+            },
           },
           students: {
             include: {
@@ -207,7 +212,8 @@ export async function adminClassRoutes(app: FastifyInstance) {
         academicYear: string;
         capacity?: number;
         classTeacherId?: number;
-        subjects?: string[]; // subject names
+        medium?: string;
+        sortOrder?: number;
         customFields?: Record<string, string>;
       };
 
@@ -246,6 +252,8 @@ export async function adminClassRoutes(app: FastifyInstance) {
             classNumber: body.classNumber,
             section,
             stream: streamValue,
+            medium: body.medium ?? null,
+            sortOrder: body.sortOrder ?? 0,
             room: body.room ?? null,
             shift: body.shift ?? "MORNING",
             academicYear: body.academicYear,
@@ -254,21 +262,6 @@ export async function adminClassRoutes(app: FastifyInstance) {
             isActive: true,
           },
         });
-
-        // Create subjects if provided
-        if (body.subjects && body.subjects.length > 0) {
-          await prisma.subject.createMany({
-            data: body.subjects.map((name) => ({
-              schoolId,
-              classId: cls.id,
-              name,
-              code: null,
-              teacherId: null,
-              isActive: true,
-            })),
-            skipDuplicates: true,
-          });
-        }
 
         created.push(cls);
       }
@@ -294,7 +287,8 @@ export async function adminClassRoutes(app: FastifyInstance) {
         capacity?: number;
         classTeacherId?: number | null;
         stream?: string | null;
-        subjects?: { id?: number; name: string; code?: string; teacherId?: number | null }[];
+        medium?: string | null;
+        sortOrder?: number;
       };
 
       const cls = await prisma.class.findFirst({
@@ -315,28 +309,11 @@ export async function adminClassRoutes(app: FastifyInstance) {
           shift: body.shift,
           capacity: body.capacity,
           classTeacherId: body.classTeacherId ?? null,
+          ...(body.medium !== undefined ? { medium: body.medium } : {}),
+          ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
           ...(body.stream !== undefined ? { stream: ["11", "12"].includes(cls.classNumber) ? body.stream : null } : {}),
         },
       });
-
-      // Update subjects — delete all then recreate
-      if (body.subjects !== undefined) {
-        await prisma.subject.deleteMany({
-          where: { classId: parseInt(id) },
-        });
-        if (body.subjects.length > 0) {
-          await prisma.subject.createMany({
-            data: body.subjects.map((s) => ({
-              schoolId,
-              classId: parseInt(id),
-              name: s.name,
-              code: s.code ?? null,
-              teacherId: s.teacherId ?? null,
-              isActive: true,
-            })),
-          });
-        }
-      }
 
       return reply.send({
         success: true,
@@ -347,6 +324,31 @@ export async function adminClassRoutes(app: FastifyInstance) {
   );
 
   // ── DELETE /admin/classes/:id ─────────────────────────────
+  // ── PUT /admin/classes/reorder ────────────────────────────
+  // Bulk-update sortOrder for several classes at once — what a
+  // drag-drop reorder UI calls after the admin drops a class into
+  // its new position.
+  app.put(
+    "/admin/classes/reorder",
+    { preHandler: [authenticate, requireCapability('academics.core')] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { schoolId } = request.user as any;
+      const body = request.body as { order: { classId: number; sortOrder: number }[] };
+
+      if (!Array.isArray(body.order) || body.order.length === 0) {
+        return reply.status(400).send({ success: false, message: "order is required." });
+      }
+
+      await prisma.$transaction(
+        body.order.map(({ classId, sortOrder }) =>
+          prisma.class.updateMany({ where: { id: classId, schoolId }, data: { sortOrder } })
+        )
+      );
+
+      return reply.send({ success: true, message: "Class order updated." });
+    }
+  );
+
   app.delete(
     "/admin/classes/:id",
     { preHandler: [authenticate, requireCapability('academics.core')] },

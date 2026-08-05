@@ -23,7 +23,7 @@ export async function studentCurriculumRoutes(app: FastifyInstance) {
       const student = await safe("student lookup", () =>
         prisma.student.findFirst({
           where: { userId, schoolId, isActive: true },
-          select: { classId: true, class: { select: { academicYear: true } } },
+          select: { classId: true, class: { select: { classNumber: true, academicYear: true } } },
         }), null);
       if (!student) return reply.status(404).send({ success: false, error: "STUDENT_NOT_FOUND" });
 
@@ -39,7 +39,7 @@ export async function studentCurriculumRoutes(app: FastifyInstance) {
 
       const subjects = await safe("subjects", () =>
         prisma.subject.findMany({
-          where: { classId: student.classId, isActive: true },
+          where: { classNumber: student.class?.classNumber, isActive: true },
           orderBy: { name: "asc" },
           select: { id: true, name: true },
         }), [] as any[]);

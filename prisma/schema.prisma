@@ -61,6 +61,71 @@ enum Shift {
   EVENING
 }
 
+// ── Academics Reform — new enums ───────────────────────────
+enum SessionStatus {
+  DRAFT
+  ACTIVE
+  LOCKED
+  ARCHIVED
+}
+
+enum SubjectType {
+  CORE
+  ELECTIVE
+}
+
+enum SubjectMode {
+  THEORY
+  PRACTICAL
+  BOTH
+}
+
+enum CalendarEventType {
+  HOLIDAY
+  EXAM
+  EVENT
+  PTM
+  SPORTS_DAY
+  ANNUAL_FUNCTION
+  CUSTOM
+}
+
+enum HolidayType {
+  PUBLIC
+  SCHOOL
+  EMERGENCY
+}
+
+enum WeekDay {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum SaturdayPattern {
+  ALL_WORKING
+  ALL_OFF
+  ALTERNATE_1_3
+  ALTERNATE_2_4
+  ALTERNATE_1_3_5
+}
+
+enum ClassTeacherRole {
+  PRIMARY
+  ASSISTANT
+  COORDINATOR
+}
+
+enum GradingSystemType {
+  PERCENTAGE
+  GPA
+  LETTER_GRADE
+}
+
 enum AttendanceStatus {
   PRESENT
   ABSENT
@@ -2559,6 +2624,14 @@ model School {
   admissionSettings      AdmissionSettings?
   notifSettings          NotifSettings?
   websiteConfig          WebsiteConfig?
+  subjectAssignments     SubjectAssignment[]
+  streams                Stream[]
+  classTeacherAssignments ClassTeacherAssignment[]
+  holidays               Holiday[]
+  calendarEvents         CalendarEvent[]
+  workingDayConfigs      WorkingDayConfig[]
+  academicPolicies       AcademicPolicy[]
+  substituteAssignments  SubstituteAssignment[]
   tasks                  Task[]
   taskTemplates          TaskTemplate[]
   schoolSubscription     SchoolSubscription?
@@ -2593,14 +2666,23 @@ model SuperAdmin {
 // ─────────────────────────────────────────
 
 model AcademicYear {
-  id        Int      @id @default(autoincrement())
-  schoolId  Int
-  school    School   @relation(fields: [schoolId], references: [id])
-  name      String   @db.VarChar(20)
-  startDate DateTime
-  endDate   DateTime
-  isCurrent Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  schoolId     Int
+  school       School   @relation(fields: [schoolId], references: [id])
+  name         String   @db.VarChar(20)
+  startDate    DateTime
+  endDate      DateTime
+  isCurrent    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  // ── Session lifecycle (Academic Sessions module) ──────────
+  status       SessionStatus @default(DRAFT)
+  clonedFromId Int?
+  clonedFrom   AcademicYear?  @relation("SessionClone", fields: [clonedFromId], references: [id])
+  clonedInto   AcademicYear[] @relation("SessionClone")
+  activatedAt  DateTime?
+  lockedAt     DateTime?
+  archivedAt   DateTime?
 
   feeStructures         FeeStructure[]
   invoices              Invoice[]
@@ -2609,6 +2691,14 @@ model AcademicYear {
   sessionFinanceControl SessionFinanceControl?
   carryForwards         CarryForward[]
   carryForwardsTarget   CarryForward[]         @relation("CarryForwardTargetYear")
+
+  // ── Academics reform relations ────────────────────────────
+  holidays                Holiday[]
+  calendarEvents          CalendarEvent[]
+  workingDayConfig        WorkingDayConfig?
+  subjectAssignments      SubjectAssignment[]
+  classTeacherAssignments ClassTeacherAssignment[]
+  academicPolicy          AcademicPolicy?
 
   @@unique([schoolId, name])
   @@index([schoolId, isCurrent])
@@ -2648,6 +2738,7 @@ model User {
   attendanceMarked          Attendance[]               @relation("MarkedBy")
   invoicesCreated           Invoice[]                  @relation("CreatedBy")
   paymentsReceived          Payment[]                  @relation("ReceivedBy")
+  substitutesCreated        SubstituteAssignment[]     @relation("SubstituteCreatedBy")
   announcementsCreated      Announcement[]             @relation("AnnouncementCreator")
   announcementReads         AnnouncementRead[]         @relation("AnnouncementReads")
   studentLeaves             LeaveRequest[]             @relation("StudentLeaves")
@@ -2997,8 +3088,11 @@ model Staff {
   updatedAt       DateTime     @updatedAt
 
   classesAsTeacher        Class[]                     @relation("ClassTeacher")
-  subjects                Subject[]                   @relation("SubjectTeacher")
   periodsAsTeacher        PeriodSlot[]                @relation("PeriodTeacher")
+  subjectAssignments      SubjectAssignment[]         @relation("SubjectAssignmentTeacher")
+  classTeacherAssignments ClassTeacherAssignment[]    @relation("ClassTeacherAssignmentStaff")
+  substitutionsAsOriginal SubstituteAssignment[]      @relation("OriginalTeacherSub")
+  substitutionsAsCover    SubstituteAssignment[]      @relation("SubstituteTeacherSub")
   leaveRequests           LeaveRequest[]              @relation("StaffLeaves")
   invigilations           ExamSlot[]                  @relation("SlotInvigilator")
   backupInvigilations     ExamSlot[]                  @relation("SlotBackupInvigilator")
@@ -3079,6 +3173,8 @@ model Class {
   classNumber  String  @db.VarChar(5)
   section      String  @db.VarChar(5)
   stream       String? @db.VarChar(20) // "ARTS" | "SCIENCE" | "COMMERCE" — only used for classNumber 11/12
+  medium       String? @db.VarChar(20) // e.g. "English", "Hindi"
+  sortOrder    Int     @default(0) // display order in class lists (e.g. Nursery before LKG before Class 1)
   room         String? @db.VarChar(20)
   shift        Shift   @default(MORNING)
   academicYear String  @db.VarChar(10)
@@ -3086,8 +3182,9 @@ model Class {
   isActive     Boolean @default(true)
 
   students               Student[]
-  subjects               Subject[]
   attendance             Attendance[]
+  subjectAssignments     SubjectAssignment[]
+  classTeacherAssignments ClassTeacherAssignment[]
   feeStructures          FeeStructure[]
   periodSlots            PeriodSlot[]
   announcements          Announcement[]
@@ -3120,16 +3217,21 @@ model Class {
 // ─────────────────────────────────────────
 
 model Subject {
-  id        Int            @id @default(autoincrement())
-  schoolId  Int
-  school    School         @relation(fields: [schoolId], references: [id])
-  classId   Int
-  class     Class          @relation(fields: [classId], references: [id])
-  teacherId Int?
-  teacher   Staff?         @relation("SubjectTeacher", fields: [teacherId], references: [id])
-  name      String         @db.VarChar(100)
-  code      String?        @db.VarChar(20)
-  isActive  Boolean        @default(true)
+  id          Int         @id @default(autoincrement())
+  schoolId    Int
+  school      School      @relation(fields: [schoolId], references: [id])
+  classNumber String      @db.VarChar(5) // grade level, e.g. "5", "11" — NOT tied to one section
+  name        String      @db.VarChar(100)
+  code        String?     @db.VarChar(20)
+  subjectType SubjectType @default(CORE)
+  subjectMode SubjectMode @default(THEORY)
+  credits     Int?
+  streamId    Int?
+  stream      Stream?     @relation(fields: [streamId], references: [id])
+  isActive    Boolean     @default(true)
+
+  assignments    SubjectAssignment[]
+  streamSubjects StreamSubject[]
 
   periodSlots        PeriodSlot[]
   examSubjects       ExamSubject[]
@@ -3138,11 +3240,185 @@ model Subject {
   examDocuments      ExamDocument[]
   onlineExams        OnlineExam[]
 
-  @@unique([schoolId, classId, name])
+  @@unique([schoolId, classNumber, name])
+  @@index([schoolId])
+  @@index([schoolId, classNumber])
+  @@index([streamId])
+  @@map("subjects")
+}
+
+// The real "teacher teaches this subject to this section" link —
+// previously conflated into Subject itself, which made a subject
+// unable to have more than one teacher across sections.
+model SubjectAssignment {
+  id             Int          @id @default(autoincrement())
+  schoolId       Int
+  school         School       @relation(fields: [schoolId], references: [id])
+  subjectId      Int
+  subject        Subject      @relation(fields: [subjectId], references: [id])
+  classId        Int // the actual section
+  class          Class        @relation(fields: [classId], references: [id])
+  teacherId      Int
+  teacher        Staff        @relation("SubjectAssignmentTeacher", fields: [teacherId], references: [id])
+  academicYearId Int
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  weeklyPeriods  Int          @default(0)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+
+  @@unique([subjectId, classId, academicYearId])
   @@index([schoolId])
   @@index([classId])
   @@index([teacherId])
-  @@map("subjects")
+  @@index([academicYearId])
+  @@map("subject_assignments")
+}
+
+model Stream {
+  id           Int      @id @default(autoincrement())
+  schoolId     Int
+  school       School   @relation(fields: [schoolId], references: [id])
+  name         String   @db.VarChar(50) // "Science", "Commerce", "Arts"
+  code         String?  @db.VarChar(20)
+  classNumbers String[] // which grades this stream applies to, e.g. ["11","12"]
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  subjects       Subject[]
+  streamSubjects StreamSubject[]
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
+  @@map("streams")
+}
+
+// Which subjects belong to a stream, and whether they're compulsory
+// or part of an elective-choice group (e.g. "pick 1 of Biology/
+// Computer Science/Economics" — grouped via groupLabel).
+model StreamSubject {
+  id           Int     @id @default(autoincrement())
+  streamId     Int
+  stream       Stream  @relation(fields: [streamId], references: [id])
+  subjectId    Int
+  subject      Subject @relation(fields: [subjectId], references: [id])
+  isCompulsory Boolean @default(true)
+  groupLabel   String? @db.VarChar(50)
+
+  @@unique([streamId, subjectId])
+  @@index([streamId])
+  @@map("stream_subjects")
+}
+
+// Replaces the single Class.classTeacherId with proper multi-role
+// support (Primary / Assistant / Coordinator) per section per session.
+// Class.classTeacherId is kept for backward compatibility with any
+// existing code reading it directly — this model is the richer,
+// forward-looking source of truth.
+model ClassTeacherAssignment {
+  id             Int              @id @default(autoincrement())
+  schoolId       Int
+  school         School           @relation(fields: [schoolId], references: [id])
+  classId        Int
+  class          Class            @relation(fields: [classId], references: [id])
+  staffId        Int
+  staff          Staff            @relation("ClassTeacherAssignmentStaff", fields: [staffId], references: [id])
+  role           ClassTeacherRole @default(PRIMARY)
+  academicYearId Int
+  academicYear   AcademicYear     @relation(fields: [academicYearId], references: [id])
+  createdAt      DateTime         @default(now())
+
+  @@unique([classId, role, academicYearId])
+  @@index([schoolId])
+  @@index([classId])
+  @@index([staffId])
+  @@map("class_teacher_assignments")
+}
+
+// ─────────────────────────────────────────
+// ACADEMIC CALENDAR
+// ─────────────────────────────────────────
+
+model Holiday {
+  id             Int          @id @default(autoincrement())
+  schoolId       Int
+  school         School       @relation(fields: [schoolId], references: [id])
+  academicYearId Int
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  name           String       @db.VarChar(150)
+  date           DateTime     @db.Date
+  endDate        DateTime?    @db.Date // multi-day holidays
+  type           HolidayType  @default(PUBLIC)
+  description    String?      @db.VarChar(400)
+  createdAt      DateTime     @default(now())
+
+  @@index([schoolId, academicYearId])
+  @@index([schoolId, date])
+  @@map("holidays")
+}
+
+model CalendarEvent {
+  id             Int               @id @default(autoincrement())
+  schoolId       Int
+  school         School            @relation(fields: [schoolId], references: [id])
+  academicYearId Int
+  academicYear   AcademicYear      @relation(fields: [academicYearId], references: [id])
+  title          String            @db.VarChar(150)
+  type           CalendarEventType @default(CUSTOM)
+  startDate      DateTime          @db.Date
+  endDate        DateTime?         @db.Date
+  startTime      String?           @db.VarChar(5)
+  endTime        String?           @db.VarChar(5)
+  location       String?           @db.VarChar(150)
+  colorHex       String?           @db.VarChar(10) // color-coded calendar
+  description    String?           @db.VarChar(600)
+  isAllDay       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+
+  @@index([schoolId, academicYearId])
+  @@index([schoolId, startDate])
+  @@map("calendar_events")
+}
+
+// ─────────────────────────────────────────
+// WORKING DAYS
+// ─────────────────────────────────────────
+
+model WorkingDayConfig {
+  id              Int             @id @default(autoincrement())
+  schoolId        Int
+  school          School          @relation(fields: [schoolId], references: [id])
+  academicYearId  Int             @unique
+  academicYear    AcademicYear    @relation(fields: [academicYearId], references: [id])
+  workingDays     WeekDay[]
+  saturdayPattern SaturdayPattern @default(ALL_WORKING)
+  sundayOff       Boolean         @default(true)
+  updatedAt       DateTime        @updatedAt
+
+  @@index([schoolId])
+  @@map("working_day_configs")
+}
+
+// ─────────────────────────────────────────
+// ACADEMIC POLICIES
+// ─────────────────────────────────────────
+
+model AcademicPolicy {
+  id                  Int               @id @default(autoincrement())
+  schoolId            Int
+  school              School            @relation(fields: [schoolId], references: [id])
+  academicYearId      Int               @unique
+  academicYear        AcademicYear      @relation(fields: [academicYearId], references: [id])
+  minAttendancePct    Int               @default(75)
+  promotionMinPct     Int               @default(33)
+  subjectPassingMarks Int               @default(33)
+  graceMarks          Int               @default(0)
+  allowGraceMarks     Boolean           @default(true)
+  gradingSystem       GradingSystemType @default(PERCENTAGE)
+  maxClassStrength    Int?
+  updatedAt           DateTime          @updatedAt
+
+  @@index([schoolId])
+  @@map("academic_policies")
 }
 
 // ─────────────────────────────────────────
@@ -3361,14 +3637,43 @@ model PeriodSlot {
   subject      Subject? @relation(fields: [subjectId], references: [id])
   teacherId    Int?
   teacher      Staff?   @relation("PeriodTeacher", fields: [teacherId], references: [id])
+  room         String?  @db.VarChar(20)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  substitutions SubstituteAssignment[]
 
   @@unique([classId, dayOfWeek, periodNumber, academicYear])
   @@index([schoolId])
   @@index([classId])
   @@index([teacherId])
   @@map("period_slots")
+}
+
+// A one-off cover for a single date — the original PeriodSlot stays
+// unchanged (it's the recurring weekly schedule), this just says "on
+// this specific date, this teacher covers instead."
+model SubstituteAssignment {
+  id                Int        @id @default(autoincrement())
+  schoolId          Int
+  school            School     @relation(fields: [schoolId], references: [id])
+  periodSlotId      Int
+  periodSlot        PeriodSlot @relation(fields: [periodSlotId], references: [id], onDelete: Cascade)
+  date              DateTime   @db.Date
+  originalTeacherId Int
+  originalTeacher   Staff      @relation("OriginalTeacherSub", fields: [originalTeacherId], references: [id])
+  substituteId      Int
+  substitute        Staff      @relation("SubstituteTeacherSub", fields: [substituteId], references: [id])
+  reason            String?    @db.VarChar(200)
+  createdById       Int
+  createdBy         User       @relation("SubstituteCreatedBy", fields: [createdById], references: [id])
+  createdAt         DateTime   @default(now())
+
+  @@unique([periodSlotId, date])
+  @@index([schoolId])
+  @@index([date])
+  @@index([substituteId])
+  @@map("substitute_assignments")
 }
 
 model MasterPeriod {
