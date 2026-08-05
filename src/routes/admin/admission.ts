@@ -728,10 +728,7 @@ const [dupAdm, dupStudentPhone, dupRoll] = await Promise.all([
 
       const student = await prisma.student.findFirst({
         where: { id: parseInt(id), schoolId },
-        select: {
-          userId: true,
-          parentStudents: { select: { parentId: true } },
-        },
+        select: { userId: true },
       });
       if (!student) {
         return reply.status(404).send({ success: false, message: "Not found." });
@@ -745,8 +742,15 @@ const [dupAdm, dupStudentPhone, dupRoll] = await Promise.all([
           data:  { passwordHash: hash },
         });
       } else {
-        // Reset ALL linked parent accounts' passwords
-        const parentIds = student.parentStudents.map((ps: any) => ps.parentId);
+        // ParentStudent.studentId references the student's USER id, not Student.id
+        const links = await prisma.parentStudent.findMany({
+          where: { studentId: student.userId },
+          select: { parentId: true },
+        });
+        const parentIds = links.map((l) => l.parentId);
+        if (parentIds.length === 0) {
+          return reply.status(400).send({ success: false, message: "This student has no linked parent account." });
+        }
         await prisma.user.updateMany({
           where: { id: { in: parentIds } },
           data:  { passwordHash: hash },
