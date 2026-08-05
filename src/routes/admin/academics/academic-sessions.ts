@@ -137,7 +137,7 @@ export async function adminAcademicSessionRoutes(app: FastifyInstance) {
         data: {
           schoolId, name: body.name.trim(), startDate: start, endDate: end,
           isCurrent: body.setAsCurrent ?? false,
-          status: body.setAsCurrent ? "ACTIVE" : "DRAFT",
+          status: body.setAsCurrent ? "OPEN" : "DRAFT",
           activatedAt: body.setAsCurrent ? new Date() : null,
         },
       });
@@ -237,14 +237,14 @@ export async function adminAcademicSessionRoutes(app: FastifyInstance) {
 
       const session = await prisma.academicYear.findFirst({ where: { id: parseInt(id), schoolId } });
       if (!session) return reply.status(404).send({ success: false, message: "Session not found." });
-      if (session.status === "LOCKED" || session.status === "ARCHIVED") {
+      if (session.status === "LOCKED" || session.status === "CLOSED") {
         return reply.status(400).send({ success: false, message: `A ${session.status.toLowerCase()} session can't be activated directly.` });
       }
 
       await prisma.academicYear.updateMany({ where: { schoolId }, data: { isCurrent: false } });
       const updated = await prisma.academicYear.update({
         where: { id: parseInt(id) },
-        data: { isCurrent: true, status: "ACTIVE", activatedAt: new Date() },
+        data: { isCurrent: true, status: "OPEN", activatedAt: new Date() },
       });
 
       return reply.send({ success: true, message: `"${updated.name}" is now the active session.`, data: { session: updated } });
@@ -270,7 +270,7 @@ export async function adminAcademicSessionRoutes(app: FastifyInstance) {
         where: { id: parseInt(id) },
         data: body.locked
           ? { status: "LOCKED", lockedAt: new Date() }
-          : { status: session.archivedAt ? "ARCHIVED" : "DRAFT", lockedAt: null },
+          : { status: session.archivedAt ? "CLOSED" : "DRAFT", lockedAt: null },
       });
 
       return reply.send({ success: true, message: body.locked ? "Session locked." : "Session unlocked.", data: { session: updated } });
@@ -291,7 +291,7 @@ export async function adminAcademicSessionRoutes(app: FastifyInstance) {
 
       const updated = await prisma.academicYear.update({
         where: { id: parseInt(id) },
-        data: { status: "ARCHIVED", archivedAt: new Date() },
+        data: { status: "CLOSED", archivedAt: new Date() },
       });
       return reply.send({ success: true, message: `Session "${session.name}" archived.`, data: { session: updated } });
     }

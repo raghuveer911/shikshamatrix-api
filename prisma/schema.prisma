@@ -62,24 +62,6 @@ enum Shift {
 }
 
 // ── Academics Reform — new enums ───────────────────────────
-enum SessionStatus {
-  DRAFT
-  ACTIVE
-  LOCKED
-  ARCHIVED
-}
-
-enum SubjectType {
-  CORE
-  ELECTIVE
-}
-
-enum SubjectMode {
-  THEORY
-  PRACTICAL
-  BOTH
-}
-
 enum CalendarEventType {
   HOLIDAY
   EXAM
@@ -88,12 +70,6 @@ enum CalendarEventType {
   SPORTS_DAY
   ANNUAL_FUNCTION
   CUSTOM
-}
-
-enum HolidayType {
-  PUBLIC
-  SCHOOL
-  EMERGENCY
 }
 
 enum WeekDay {
@@ -198,6 +174,7 @@ enum HolidayType {
   EVENT
   FESTIVAL
   LOCAL
+  EMERGENCY
 }
 
 enum LeaveStatus {
@@ -1309,6 +1286,7 @@ enum BulkOperationType {
 }
 
 enum SessionStatus {
+  DRAFT
   OPEN
   LOCKED
   CLOSED
@@ -3223,8 +3201,8 @@ model Subject {
   classNumber String      @db.VarChar(5) // grade level, e.g. "5", "11" — NOT tied to one section
   name        String      @db.VarChar(100)
   code        String?     @db.VarChar(20)
-  subjectType SubjectType @default(CORE)
-  subjectMode SubjectMode @default(THEORY)
+  isElective  Boolean     @default(false)
+  subjectMode SubjectType @default(THEORY)
   credits     Int?
   streamId    Int?
   stream      Stream?     @relation(fields: [streamId], references: [id])
@@ -3347,7 +3325,7 @@ model Holiday {
   name           String       @db.VarChar(150)
   date           DateTime     @db.Date
   endDate        DateTime?    @db.Date // multi-day holidays
-  type           HolidayType  @default(PUBLIC)
+  type           HolidayType  @default(NATIONAL)
   description    String?      @db.VarChar(400)
   createdAt      DateTime     @default(now())
 

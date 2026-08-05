@@ -56,7 +56,7 @@ export async function adminSubjectMasterRoutes(app: FastifyInstance) {
       const { schoolId } = req.user as any;
       const b = req.body as {
         classNumber: string; name: string; code?: string;
-        subjectType?: "CORE" | "ELECTIVE"; subjectMode?: "THEORY" | "PRACTICAL" | "BOTH";
+        isElective?: boolean; subjectMode?: "THEORY" | "PRACTICAL" | "ORAL" | "ACTIVITY" | "ASSIGNMENT";
         credits?: number; streamId?: number;
       };
 
@@ -70,7 +70,7 @@ export async function adminSubjectMasterRoutes(app: FastifyInstance) {
       const subject = await prisma.subject.create({
         data: {
           schoolId, classNumber: b.classNumber, name: b.name.trim(), code: b.code ?? null,
-          subjectType: b.subjectType ?? "CORE", subjectMode: b.subjectMode ?? "THEORY",
+          isElective: b.isElective ?? false, subjectMode: b.subjectMode ?? "THEORY",
           credits: b.credits ?? null, streamId: b.streamId ?? null,
         },
       });
@@ -93,7 +93,7 @@ export async function adminSubjectMasterRoutes(app: FastifyInstance) {
         data: {
           ...(b.name !== undefined ? { name: b.name.trim() } : {}),
           ...(b.code !== undefined ? { code: b.code } : {}),
-          ...(b.subjectType !== undefined ? { subjectType: b.subjectType } : {}),
+          ...(b.isElective !== undefined ? { isElective: b.isElective } : {}),
           ...(b.subjectMode !== undefined ? { subjectMode: b.subjectMode } : {}),
           ...(b.credits !== undefined ? { credits: b.credits } : {}),
           ...(b.streamId !== undefined ? { streamId: b.streamId } : {}),

@@ -207,7 +207,7 @@ export async function adminAcademicCalendarRoutes(app: FastifyInstance) {
       const holiday = await prisma.holiday.create({
         data: {
           schoolId, academicYearId: b.academicYearId, name: b.name.trim(),
-          date: start, endDate: end, type: (b.type as any) ?? "PUBLIC",
+          date: start, endDate: end, type: (b.type as any) ?? "NATIONAL",
           description: b.description ?? null,
         },
       });
@@ -270,7 +270,7 @@ export async function adminAcademicCalendarRoutes(app: FastifyInstance) {
         data: valid.map(h => ({
           schoolId, academicYearId: b.academicYearId, name: h.name.trim(),
           date: new Date(h.date), endDate: h.endDate ? new Date(h.endDate) : null,
-          type: (h.type as any) ?? "PUBLIC",
+          type: (h.type as any) ?? "NATIONAL",
         })),
       });
 

@@ -15,7 +15,7 @@ export async function adminStreamRoutes(app: FastifyInstance) {
       const { schoolId } = req.user as any;
       const streams = await prisma.stream.findMany({
         where: { schoolId, isActive: true },
-        include: { streamSubjects: { include: { subject: { select: { id: true, name: true, subjectType: true } } } } },
+        include: { streamSubjects: { include: { subject: { select: { id: true, name: true, isElective: true } } } } },
         orderBy: { name: "asc" },
       });
       return rep.send({ success: true, data: { streams } });
