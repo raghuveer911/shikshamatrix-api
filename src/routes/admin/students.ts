@@ -156,13 +156,14 @@ export async function adminStudentsRoutes(app: FastifyInstance) {
 
       try {
         const student = await prisma.$transaction(async (tx) => {
-          if (b.userName || b.userPhone || b.userEmail) {
+          if (b.userName || b.userPhone || b.userEmail || b.avatarUrl !== undefined) {
             await tx.user.update({
               where: { id: existing.userId },
               data: {
                 ...(b.userName ? { name: b.userName } : {}),
                 ...(b.userPhone !== undefined ? { phone: b.userPhone || null } : {}),
                 ...(b.userEmail !== undefined ? { email: b.userEmail || null } : {}),
+                ...(b.avatarUrl !== undefined ? { avatarUrl: b.avatarUrl || null } : {}),
               },
             });
           }
