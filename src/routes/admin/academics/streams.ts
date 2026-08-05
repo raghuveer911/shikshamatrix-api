@@ -2,9 +2,9 @@
 // Streams (Science / Commerce / Arts, etc.) — a real entity with
 // its own subject groupings, instead of a free-text label on Class.
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { prisma } from "../../lib/prisma.js";
-import { authenticate } from "../../middleware/authenticate.js";
-import { requireCapability } from "../../middleware/checkCapability.js";
+import { prisma } from "../../../lib/prisma.js";
+import { authenticate } from "../../../middleware/authenticate.js";
+import { requireCapability } from "../../../middleware/checkCapability.js";
 
 export async function adminStreamRoutes(app: FastifyInstance) {
   const P = "/admin/streams";

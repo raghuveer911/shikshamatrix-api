@@ -5,9 +5,9 @@
 // The Academic Calendar's is-working-day endpoint reads this to decide
 // whether any given date counts as a school day.
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { prisma } from "../../lib/prisma.js";
-import { authenticate } from "../../middleware/authenticate.js";
-import { requireCapability } from "../../middleware/checkCapability.js";
+import { prisma } from "../../../lib/prisma.js";
+import { authenticate } from "../../../middleware/authenticate.js";
+import { requireCapability } from "../../../middleware/checkCapability.js";
 
 const ALL_WEEKDAYS = ["MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY","SUNDAY"];
 const DEFAULT_WORKING = ["MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY"];

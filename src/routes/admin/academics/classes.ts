@@ -1,8 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { prisma } from "../../lib/prisma.js";
-import { authenticate } from "../../middleware/authenticate.js";
-import { requireCapability } from "../../middleware/checkCapability.js";
-import { hashPassword } from "../../utils/auth.js";
+import { prisma } from "../../../lib/prisma.js";
+import { authenticate } from "../../../middleware/authenticate.js";
+import { requireCapability } from "../../../middleware/checkCapability.js";
+import { hashPassword } from "../../../utils/auth.js";
 import * as XLSX from "xlsx";
 
 // Canonical class-level sequence — pre-primary levels aren't numeric, so

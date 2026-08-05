@@ -5,9 +5,9 @@
 // Promotion: this happens WITHIN a session, not across one, and
 // never touches roll-number-generation-for-a-new-year logic.
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { prisma } from "../../lib/prisma.js";
-import { authenticate } from "../../middleware/authenticate.js";
-import { requireCapability } from "../../middleware/checkCapability.js";
+import { prisma } from "../../../lib/prisma.js";
+import { authenticate } from "../../../middleware/authenticate.js";
+import { requireCapability } from "../../../middleware/checkCapability.js";
 
 export async function adminSectionTransferRoutes(app: FastifyInstance) {
   const P = "/admin/section-transfer";

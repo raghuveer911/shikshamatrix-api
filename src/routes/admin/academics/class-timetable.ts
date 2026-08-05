@@ -1,7 +1,7 @@
 // apps/api/src/routes/admin/class-timetable.ts
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { prisma } from "../../lib/prisma.js";
-import { authenticate } from "../../middleware/authenticate.js";
+import { prisma } from "../../../lib/prisma.js";
+import { authenticate } from "../../../middleware/authenticate.js";
 
 const SUBJECT_COLORS = [
   "#6366f1","#3b82f6","#10b981","#f59e0b","#ef4444",

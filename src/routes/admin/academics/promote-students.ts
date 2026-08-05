@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { prisma } from "../../lib/prisma.js";
-import { authenticate } from "../../middleware/authenticate.js";
-import { requireCapability } from "../../middleware/checkCapability.js";
+import { prisma } from "../../../lib/prisma.js";
+import { authenticate } from "../../../middleware/authenticate.js";
+import { requireCapability } from "../../../middleware/checkCapability.js";
 
 export async function adminPromoteStudentsRoutes(app: FastifyInstance) {
 

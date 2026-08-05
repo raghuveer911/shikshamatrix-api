@@ -4,9 +4,9 @@
 // the derived "is this date a working day?" logic that Attendance,
 // Timetable and Fee-due calculations all need a single answer for.
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { prisma } from "../../lib/prisma.js";
-import { authenticate } from "../../middleware/authenticate.js";
-import { requireCapability } from "../../middleware/checkCapability.js";
+import { prisma } from "../../../lib/prisma.js";
+import { authenticate } from "../../../middleware/authenticate.js";
+import { requireCapability } from "../../../middleware/checkCapability.js";
 
 // Default colors per event type, so a school gets a sensible
 // color-coded calendar without configuring anything.

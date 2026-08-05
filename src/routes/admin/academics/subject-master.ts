@@ -3,9 +3,9 @@
 // school, shared across every section of a grade instead of being
 // duplicated per class-section.
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { prisma } from "../../lib/prisma.js";
-import { authenticate } from "../../middleware/authenticate.js";
-import { requireCapability } from "../../middleware/checkCapability.js";
+import { prisma } from "../../../lib/prisma.js";
+import { authenticate } from "../../../middleware/authenticate.js";
+import { requireCapability } from "../../../middleware/checkCapability.js";
 
 export async function adminSubjectMasterRoutes(app: FastifyInstance) {
   const P = "/admin/subject-master";

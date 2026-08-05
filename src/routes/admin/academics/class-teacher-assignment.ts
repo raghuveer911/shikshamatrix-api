@@ -6,9 +6,9 @@
 // PRIMARY assignment is made, so any older code reading it directly
 // still sees the right teacher.
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { prisma } from "../../lib/prisma.js";
-import { authenticate } from "../../middleware/authenticate.js";
-import { requireCapability } from "../../middleware/checkCapability.js";
+import { prisma } from "../../../lib/prisma.js";
+import { authenticate } from "../../../middleware/authenticate.js";
+import { requireCapability } from "../../../middleware/checkCapability.js";
 
 export async function adminClassTeacherAssignmentRoutes(app: FastifyInstance) {
   const P = "/admin/class-teacher-assignments";
