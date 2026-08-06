@@ -72,6 +72,21 @@ enum CalendarEventType {
   CUSTOM
 }
 
+enum CalendarAudience {
+  EVERYONE
+  STUDENTS
+  STAFF
+  PARENTS
+  SPECIFIC_CLASSES
+}
+
+enum CalendarRecurrence {
+  NONE
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
 enum WeekDay {
   MONDAY
   TUESDAY
@@ -2331,6 +2346,14 @@ enum SubscriptionSource {
   ADMIN_ASSIGNED   
   TRIAL            
 }
+enum DayType {
+  FULL_DAY
+  HALF_DAY
+  HOLIDAY
+  EXAM_ONLY
+  ACTIVITY
+  CUSTOM
+}
 // ─────────────────────────────────────────
 // PLATFORM LEVEL
 // ─────────────────────────────────────────
@@ -2617,7 +2640,7 @@ model School {
   commissionTransactions CommissionTransaction[]
   trialHistory           TrialHistory?
   profileFieldChangeLogs ProfileFieldChangeLog[]
-
+  workingDayOverrides    WorkingDayOverride[]
   @@index([status])
   @@index([city, state])
   @@map("schools")
@@ -2661,6 +2684,12 @@ model AcademicYear {
   activatedAt  DateTime?
   lockedAt     DateTime?
   archivedAt   DateTime?
+  createdById  Int?
+  createdBy    User?    @relation("AcademicYearCreator", fields: [createdById], references: [id])
+  updatedAt    DateTime @default(now()) @updatedAt
+  lockedById   Int?
+  archivedById Int?
+
 
   feeStructures         FeeStructure[]
   invoices              Invoice[]
@@ -2677,9 +2706,11 @@ model AcademicYear {
   subjectAssignments      SubjectAssignment[]
   classTeacherAssignments ClassTeacherAssignment[]
   academicPolicy          AcademicPolicy?
+  workingDayOverrides WorkingDayOverride[]
 
   @@unique([schoolId, name])
   @@index([schoolId, isCurrent])
+  @@index([schoolId, status])
   @@map("academic_years")
 }
 
@@ -2855,6 +2886,8 @@ model User {
   helpArticlesAuthored      HelpArticle[]              @relation("ArticleAuthor")
   assignedTasks             Task[]                     @relation("TaskAssignee")
   createdTasks              Task[]                     @relation("TaskAssigner")
+  academicYearsCreated      AcademicYear[]             @relation("AcademicYearCreator")
+  calendarEventsCreated     CalendarEvent[]            @relation("CalendarEventCreator")
 
   hrSavedReports               HrSavedReport[]
   hrScheduledReports           HrScheduledReport[]
@@ -3097,6 +3130,7 @@ model Staff {
   hostelAsWarden          Hostel[]                    @relation("HostelWarden")
   driverVehicles          TransportVehicle[]          @relation("VehicleDriver")
   conductorVehicles       TransportVehicle[]          @relation("VehicleConductor")
+  calendarEventsOwned     CalendarEvent[]             @relation("CalendarEventOwner")
 
   groupMemberships  StaffGroupMember[]
   documents         StaffDocument[]
@@ -3352,8 +3386,28 @@ model CalendarEvent {
   isAllDay       Boolean           @default(true)
   createdAt      DateTime          @default(now())
 
+  // ── Academic Calendar premium pass ────────────────────────
+  audience           CalendarAudience   @default(EVERYONE)
+  /// Only meaningful when audience = SPECIFIC_CLASSES
+  classIds            Int[]              @default([])
+  responsibleStaffId Int?
+  responsibleStaff   Staff?             @relation("CalendarEventOwner", fields: [responsibleStaffId], references: [id])
+  /// Days before startDate to fire the reminder; null = no reminder
+  reminderDaysBefore Int?
+  notifyInApp        Boolean            @default(false)
+  notifySms          Boolean            @default(false)
+  recurrence         CalendarRecurrence @default(NONE)
+  recurrenceUntil    DateTime?          @db.Date
+  /// [{ name, url, sizeKb }] — uploaded through the existing /uploads route
+  attachments        Json?
+  isPublished        Boolean            @default(true)
+  createdById        Int?
+  createdBy          User?              @relation("CalendarEventCreator", fields: [createdById], references: [id])
+  updatedAt          DateTime           @default(now()) @updatedAt
+
   @@index([schoolId, academicYearId])
   @@index([schoolId, startDate])
+  @@index([schoolId, type])
   @@map("calendar_events")
 }
 
@@ -3370,11 +3424,37 @@ model WorkingDayConfig {
   workingDays     WeekDay[]
   saturdayPattern SaturdayPattern @default(ALL_WORKING)
   sundayOff       Boolean         @default(true)
+  halfDayWeekdays  WeekDay[]      @default([]) // e.g. every Saturday is a half day
+  defaultStartTime String?  @db.VarChar(5)
+  defaultEndTime   String?  @db.VarChar(5)
+  halfDayEndTime   String?  @db.VarChar(5)
   updatedAt       DateTime        @updatedAt
 
   @@index([schoolId])
   @@map("working_day_configs")
 }
+model WorkingDayOverride {
+  id             Int          @id @default(autoincrement())
+  schoolId       Int
+  school         School       @relation(fields: [schoolId], references: [id])
+  academicYearId Int
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+
+  date      DateTime @db.Date
+  dayType   DayType  @default(FULL_DAY)
+  reason    String?  @db.VarChar(200)
+  /// HH:mm — only meaningful for HALF_DAY, drives the bell schedule
+  endsAt    String?  @db.VarChar(5)
+
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([academicYearId, date])
+  @@index([schoolId, date])
+  @@map("working_day_overrides")
+}
+
 
 // ─────────────────────────────────────────
 // ACADEMIC POLICIES
