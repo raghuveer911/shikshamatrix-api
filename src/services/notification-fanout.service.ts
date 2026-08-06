@@ -10,6 +10,11 @@ export interface FanOutInput extends AudienceInput {
   priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT";
   title: string;
   body: string;
+  /** ADDED: where tapping the notification should navigate, e.g.
+   *  "/parent/fees?studentId=42". Stored on the row so the in-app
+   *  notification list/bell can redirect on click, and passed through
+   *  to the push payload so the mobile app can deep-link on tap too. */
+  actionUrl?: string | null;
 }
 
 // Returns the number of recipients notified. Silently notifies zero people
@@ -35,6 +40,7 @@ export async function fanOutNotification(input: FanOutInput): Promise<number> {
       priority: input.priority ?? "NORMAL",
       title: input.title,
       body: input.body,
+      actionUrl: input.actionUrl ?? null,
     })),
   });
 
@@ -43,6 +49,7 @@ export async function fanOutNotification(input: FanOutInput): Promise<number> {
   // undoes or blocks the notification actually existing in the inbox.
   sendPushNotifications(userIds, input.title, input.body, {
     sourceType: input.sourceType, sourceId: input.sourceId, category: input.category,
+    actionUrl: input.actionUrl ?? null,
   }).catch((err) => console.log("[fanOutNotification] push send failed:", err?.message ?? err));
 
   return userIds.length;

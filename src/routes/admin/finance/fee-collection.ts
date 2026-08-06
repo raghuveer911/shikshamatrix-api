@@ -1,4 +1,4 @@
-// apps/api/src/routes/admin/fee-collection.ts
+// apps/api/src/routes/admin/finance/fee-collection.ts
 //
 // FIXED — the core bug: this file was treating Invoice as the source
 // of truth for dues, completely disconnected from
@@ -23,10 +23,21 @@
 // category (it bundles multiple fee heads). Defaulted to "OTHER" —
 // tell me if you want per-head proportional splitting instead.
 //
+// ADDED (this pass):
+//   • POST /collect now notifies the parent (in-app Notification row +
+//     push) once the payment is saved — category "FEES", clickable
+//     through to /parent/fees for that student.
+//   • GET /receipt/:id/pdf — a properly designed, downloadable/printable
+//     receipt PDF (was previously JSON-only; nothing rendered a receipt
+//     that looked like a receipt).
+//
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { prisma } from "../../../lib/prisma.js";
 import { authenticate } from "../../../middleware/authenticate.js";
 import { requireCapability } from "../../../middleware/checkCapability.js";
+import { generateFeeReceiptPdf } from "../../../lib/fee-receipt.js";
+import { resolveParentUserIdsForStudent } from "../../../lib/parent-lookup.js";
+import { fanOutNotification } from "../../../services/notification-fanout.service.js";
 
 async function genReceiptNo(schoolId: number): Promise<string> {
   const cnt = await prisma.feeReceipt.count({ where: { schoolId } });
@@ -178,6 +189,8 @@ export async function adminFeeCollectionRoutes(app: FastifyInstance) {
   // Updates the installments' paidAmount/status AND the parent
   // StudentFeePlan's aggregates, alongside creating the
   // Invoice/Payment/Receipt (billing + receipt record).
+  //
+  // ADDED: notifies the parent once the transaction commits.
   // ═══════════════════════════════════════════════════════════
   app.post("/admin/fee-collection/collect", { preHandler: [authenticate, requireCapability('finance.collection')] },
   async (req: FastifyRequest, reply: FastifyReply) => {
@@ -331,6 +344,33 @@ export async function adminFeeCollectionRoutes(app: FastifyInstance) {
  
       return { invoice, payment, receipt };
     });
+
+    // ── Notify the parent — after the transaction commits, so a push
+    // failure can never roll back or block the actual payment record.
+    // Runs in the background; the API response doesn't wait on it. ──
+    (async () => {
+      try {
+        const parentUserIds = await resolveParentUserIdsForStudent(body.studentId);
+        if (parentUserIds.length === 0) return;
+        const student = await prisma.student.findFirst({
+          where: { id: body.studentId }, include: { user: { select: { name: true } } },
+        });
+        await fanOutNotification({
+          schoolId,
+          audienceType: "CUSTOM_SEGMENT",
+          targetUserIds: parentUserIds,
+          sourceType: "SYSTEM",
+          sourceId: result.receipt.id,
+          category: "FEES",
+          priority: "NORMAL",
+          title: "Fee payment received",
+          body: `₹${body.paymentAmount.toLocaleString("en-IN")} received for ${student?.user?.name ?? "your child"}. Receipt ${receiptNo}.${dueAfter > 0 ? ` ₹${dueAfter.toLocaleString("en-IN")} still due.` : ""}`,
+          actionUrl: `/parent/fees?studentId=${body.studentId}`,
+        });
+      } catch (err: any) {
+        console.log("[fee-collection] parent notification failed:", err?.message ?? err);
+      }
+    })();
  
     return reply.status(201).send({
       success: true, message: "Payment collected successfully!",
@@ -367,6 +407,66 @@ export async function adminFeeCollectionRoutes(app: FastifyInstance) {
       if (!receipt) return reply.status(404).send({ success: false, message: "Receipt not found." });
       await prisma.feeReceipt.update({ where: { id: parseInt(id) }, data: { printCount: { increment: 1 } } });
       return reply.send({ success: true, data: { receipt } });
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════
+  // ─── GET /admin/fee-collection/receipt/:id/pdf — ADDED ────
+  // A real, properly designed receipt PDF — school letterhead, amount
+  // banner, itemized breakdown, amount in words, verify link. Streams
+  // straight to the browser so "Print" and "Download" both just work.
+  // ═══════════════════════════════════════════════════════════
+  app.get("/admin/fee-collection/receipt/:id/pdf", { preHandler: [authenticate, requireCapability('finance.collection')] },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const { id } = req.params as { id: string };
+
+      const [receipt, school] = await Promise.all([
+        prisma.feeReceipt.findFirst({
+          where: { id: parseInt(id), schoolId },
+          include: {
+            student: { include: { user: true, class: true, parentDetail: true } },
+            invoice: { include: { items: true, academicYear: { select: { name: true } } } },
+            payment: { include: { receivedBy: { select: { name: true } } } },
+          },
+        }),
+        prisma.school.findUnique({ where: { id: schoolId } }),
+      ]);
+      if (!receipt) return reply.status(404).send({ success: false, message: "Receipt not found." });
+
+      const pdfBuffer = await generateFeeReceiptPdf({
+        receiptNo: receipt.receiptNo,
+        issuedAt: receipt.createdAt,
+        schoolName: school?.name ?? "School",
+        schoolAddress: school ? [school.address, school.city, school.state, school.pincode].filter(Boolean).join(", ") : null,
+        schoolPhone: school?.phone ?? null,
+        schoolEmail: school?.email ?? null,
+
+        studentName: receipt.student.user.name,
+        admissionNumber: receipt.student.admissionNumber,
+        rollNumber: receipt.student.rollNumber,
+        className: receipt.student.class?.name ?? null,
+        fatherName: receipt.student.parentDetail?.fatherName ?? null,
+
+        academicYear: receipt.invoice?.academicYear?.name ?? "—",
+        items: (receipt.invoice?.items ?? []).map((i) => ({ description: i.description, amount: Number(i.amount) })),
+        amountPaid: Number(receipt.amount),
+        dueAfter: Number(receipt.invoice?.dueAmount ?? 0),
+
+        paymentMode: receipt.payment?.method ?? "—",
+        transactionRef: receipt.payment?.transactionId ?? null,
+        remarks: receipt.payment?.notes ?? null,
+        receivedBy: receipt.payment?.receivedBy?.name ?? null,
+
+        verifyUrl: receipt.qrCode ?? `${process.env.APP_URL ?? "https://shikshamatrix.in"}/verify-receipt/${receipt.receiptNo}`,
+      });
+
+      await prisma.feeReceipt.update({ where: { id: parseInt(id) }, data: { printCount: { increment: 1 } } });
+
+      return reply
+        .header("Content-Type", "application/pdf")
+        .header("Content-Disposition", `inline; filename="${receipt.receiptNo}.pdf"`)
+        .send(pdfBuffer);
     }
   );
 

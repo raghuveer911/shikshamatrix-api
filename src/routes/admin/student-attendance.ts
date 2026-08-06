@@ -1,7 +1,29 @@
+// apps/api/src/routes/admin/student-attendance.ts
+//
+// ADDED (this pass): POST /submit now notifies the parent of any
+// student marked ABSENT, LATE, or HALF_DAY that day — category
+// "ATTENDANCE", clickable through to /parent/attendance for that
+// student and date.
+//
+// Deliberately NOT notifying for PRESENT: attendance gets marked for
+// every student every school day, so a "present" push for every kid
+// every single day would be constant noise for very little value.
+// Flagging it here rather than assuming — say the word if you'd
+// rather every status (including PRESENT) send a notification.
+//
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { prisma } from "../../lib/prisma.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { requireCapability } from "../../middleware/checkCapability.js";
+import { resolveParentUserIdsForStudent } from "../../lib/parent-lookup.js";
+import { fanOutNotification } from "../../services/notification-fanout.service.js";
+
+const STATUS_LABEL: Record<string, string> = {
+  ABSENT: "marked absent", LATE: "marked late", HALF_DAY: "marked half-day",
+};
+const STATUS_PRIORITY: Record<string, "NORMAL" | "HIGH"> = {
+  ABSENT: "HIGH", LATE: "NORMAL", HALF_DAY: "NORMAL",
+};
 
 export async function adminStudentAttendanceRoutes(app: FastifyInstance) {
 
@@ -159,6 +181,10 @@ export async function adminStudentAttendanceRoutes(app: FastifyInstance) {
 
   // ── POST /admin/attendance/submit ─────────────────────────
   // Submit full class attendance (bulk upsert)
+  //
+  // ADDED: after saving, notifies the parent of any student marked
+  // ABSENT/LATE/HALF_DAY today. Runs in the background so a slow or
+  // failed push can never hold up the actual attendance save.
   app.post("/admin/attendance/submit",
     { preHandler: [authenticate, requireCapability('students.core')] },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -213,6 +239,43 @@ export async function adminStudentAttendanceRoutes(app: FastifyInstance) {
         late: results.filter(r => r.status === "LATE").length,
         halfDay: results.filter(r => r.status === "HALF_DAY").length,
       };
+
+      // ── Notify parents of anything worth flagging — after the save
+      // commits, in the background, so this never slows down or risks
+      // the actual attendance record. ──
+      const dateStr = date.toISOString().split("T")[0];
+      const toNotify = body.attendance.filter(a => a.status === "ABSENT" || a.status === "LATE" || a.status === "HALF_DAY");
+      if (toNotify.length > 0) {
+        (async () => {
+          try {
+            const studentRows = await prisma.student.findMany({
+              where: { id: { in: toNotify.map(a => a.studentId) } },
+              include: { user: { select: { name: true } } },
+            });
+            const nameById = new Map(studentRows.map(s => [s.id, s.user.name]));
+
+            for (const a of toNotify) {
+              const parentUserIds = await resolveParentUserIdsForStudent(a.studentId);
+              if (parentUserIds.length === 0) continue;
+              const name = nameById.get(a.studentId) ?? "your child";
+              await fanOutNotification({
+                schoolId,
+                audienceType: "CUSTOM_SEGMENT",
+                targetUserIds: parentUserIds,
+                sourceType: "SYSTEM",
+                sourceId: null,
+                category: "ATTENDANCE",
+                priority: STATUS_PRIORITY[a.status],
+                title: `Attendance update — ${name}`,
+                body: `${name} was ${STATUS_LABEL[a.status]} today (${dateStr}).${a.remarks ? ` Note: ${a.remarks}` : ""}`,
+                actionUrl: `/parent/attendance?studentId=${a.studentId}&date=${dateStr}`,
+              });
+            }
+          } catch (err: any) {
+            console.log("[attendance] parent notification failed:", err?.message ?? err);
+          }
+        })();
+      }
 
       return reply.send({
         success: true,
