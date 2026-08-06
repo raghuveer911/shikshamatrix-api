@@ -12511,6 +12511,10 @@ model Notification {
   isRead     Boolean                @default(false)
   readAt     DateTime?
   createdAt  DateTime               @default(now())
+  /// Where tapping the notification should navigate — a path the
+  /// consuming app (web or mobile) resolves itself, e.g.
+  /// "/parent/fees?studentId=42" or "/parent/attendance?studentId=42&date=2026-08-06"
+  actionUrl  String?                @db.VarChar(300)
 
   @@index([schoolId, userId, isRead])
   @@index([userId, createdAt])
