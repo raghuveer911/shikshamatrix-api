@@ -41,7 +41,7 @@ import { adminClassTeacherAssignmentRoutes } from "./routes/admin/academics/clas
 import { adminSectionTransferRoutes } from "./routes/admin/academics/section-transfer.js";
 import { adminAcademicPolicyRoutes } from "./routes/admin/academics/academic-policies.js";
 import { adminManagePeriodsRoutes } from "./routes/admin/manage-periods.js";
-import { adminClassTimetableRoutes } from "./routes/admin/class-timetable.js";
+import { adminClassTimetableRoutes } from "./routes/admin/academics/class-timetable.js";
 import { adminPromoteStudentsRoutes } from "./routes/admin/promote-students.js";
 import { adminStudentAdmissionRoutes } from "./routes/admin/admission.js";
 import { adminStudentAttendanceRoutes } from "./routes/admin/student-attendance.js";
