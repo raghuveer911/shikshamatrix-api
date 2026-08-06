@@ -252,6 +252,13 @@ import { studentProfileSecurityRoutes } from "./routes/student/profile-security.
 import { studentCalendarRoutes } from "./routes/student/academics-calendar.js";
 import { studentTimetableRoutes } from "./routes/student/academics-timetable.js";
 import { adminClassInsightRoutes } from "./routes/admin/academics/classes-insights.js";
+import { adminTimetableInsightRoutes } from "./routes/admin/academics/timetable-insights.js";
+import { adminStreamsSubjectsInsightRoutes } from "./routes/admin/academics/streams-subjects-insights.js";
+import { adminPromoteInsightRoutes } from "./routes/admin/academics/promote-insights.js";
+import { adminSectionTransferInsightRoutes } from "./routes/admin/academics/section-transfer-insights.js";
+import { adminClassTeacherInsightRoutes } from "./routes/admin/academics/class-teacher-insights.js";
+import { adminAcademicPolicyInsightRoutes } from "./routes/admin/academics/academic-policies-insights.js";
+
 async function buildApp() {
   const app = Fastify({ logger: false });
 
@@ -265,6 +272,12 @@ async function buildApp() {
 
   // Routes
   await app.register(adminClassInsightRoutes);
+  await app.register(adminTimetableInsightRoutes);
+  await app.register(adminStreamsSubjectsInsightRoutes);
+  await app.register(adminPromoteInsightRoutes);
+  await app.register(adminSectionTransferInsightRoutes);
+  await app.register(adminClassTeacherInsightRoutes);
+  await app.register(adminAcademicPolicyInsightRoutes);
   await app.register(uploadRoutes);
   await app.register(profileRoutes);
   await app.register(profileDocumentsRoutes);
