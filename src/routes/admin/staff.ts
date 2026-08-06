@@ -25,6 +25,103 @@ function parseDate(val: string): Date | null {
   return isNaN(date.getTime()) ? null : date;
 }
 
+/* ── Department / Designation / EmployeeType helpers ──────────
+   FIXED: this file used to write `department` and `designation`
+   as if they were plain string columns on Staff, and `employmentType`
+   as if it matched the EmployeeType enum's values. Neither is true —
+   department/designation are separate lookup tables (Staff links to
+   them via departmentId/designationId), and the EmployeeType enum is
+   TEACHING | NON_TEACHING | TRANSPORT | MANAGEMENT | CONTRACT | PART_TIME,
+   not PERMANENT/CONTRACT/PART_TIME/SUBSTITUTE. Every create/update was
+   throwing a Prisma "Unknown argument" or invalid-enum error.
+
+   Fix strategy: keep the API contract exactly as the frontend already
+   sends/expects it (plain `department` and `designation` name strings,
+   `employmentType` as one of the old four labels) — resolve names to
+   IDs on write, and flatten IDs back to names on read, entirely inside
+   this file. Nothing outside this file needs to change. */
+
+async function resolveDepartmentId(schoolId: number, name?: string | null): Promise<number | null> {
+  const trimmed = name?.trim();
+  if (!trimmed) return null;
+  const existing = await prisma.department.findFirst({
+    where: { schoolId, name: { equals: trimmed, mode: "insensitive" } },
+  });
+  if (existing) return existing.id;
+  const created = await prisma.department.create({ data: { schoolId, name: trimmed } });
+  return created.id;
+}
+
+async function resolveDesignationId(
+  schoolId: number, name?: string | null, departmentId?: number | null,
+): Promise<number | null> {
+  const trimmed = name?.trim();
+  if (!trimmed) return null;
+  const existing = await prisma.designation.findFirst({
+    where: { schoolId, name: { equals: trimmed, mode: "insensitive" } },
+  });
+  if (existing) return existing.id;
+  const created = await prisma.designation.create({
+    data: { schoolId, name: trimmed, departmentId: departmentId ?? null },
+  });
+  return created.id;
+}
+
+/** Old UI offers PERMANENT/CONTRACT/PART_TIME/SUBSTITUTE; the real
+ *  EmployeeType enum is TEACHING/NON_TEACHING/TRANSPORT/MANAGEMENT/
+ *  CONTRACT/PART_TIME. CONTRACT and PART_TIME pass straight through;
+ *  PERMANENT and SUBSTITUTE are mapped to the closest real value so
+ *  old requests keep working. Ask the person if they'd rather the
+ *  dropdown itself be updated to the real enum values instead. */
+const EMP_TYPE_MAP: Record<string, string> = {
+  PERMANENT: "TEACHING",
+  CONTRACT: "CONTRACT",
+  PART_TIME: "PART_TIME",
+  SUBSTITUTE: "PART_TIME",
+  TEACHING: "TEACHING",
+  NON_TEACHING: "NON_TEACHING",
+  TRANSPORT: "TRANSPORT",
+  MANAGEMENT: "MANAGEMENT",
+};
+function resolveEmployeeType(val?: string): "TEACHING" | "NON_TEACHING" | "TRANSPORT" | "MANAGEMENT" | "CONTRACT" | "PART_TIME" {
+  const key = val?.toUpperCase().trim() ?? "";
+  return (EMP_TYPE_MAP[key] ?? "TEACHING") as any;
+}
+
+/** Flattens a Prisma staff row (with departmentRef/designationRef/
+ *  subjectAssignments included) into the flat shape the frontend
+ *  already expects: department, designation as plain strings,
+ *  employmentType as the old label, subjects as [{id,name,code}]. */
+function flattenStaff(s: any) {
+  const { departmentRef, designationRef, subjectAssignments, employeeType, ...rest } = s;
+  return {
+    ...rest,
+    department: departmentRef?.name ?? null,
+    designation: designationRef?.name ?? null,
+    employmentType: employeeType,
+    subjects: (subjectAssignments ?? []).map((a: any) => a.subject).filter(Boolean),
+  };
+}
+
+const STAFF_LIST_INCLUDE = {
+  user: {
+    select: {
+      id: true, name: true, phone: true, email: true,
+      gender: true, avatarUrl: true, isActive: true, lastLoginAt: true,
+    },
+  },
+  classesAsTeacher: {
+    select: { id: true, name: true, academicYear: true },
+    where: { isActive: true },
+  },
+  departmentRef: { select: { name: true } },
+  designationRef: { select: { name: true } },
+  subjectAssignments: {
+    where: { isActive: true },
+    select: { subject: { select: { id: true, name: true } } },
+  },
+} as const;
+
 export async function adminStaffRoutes(app: FastifyInstance) {
 
   // ── GET /admin/staff ──────────────────────────────────────
@@ -51,38 +148,23 @@ export async function adminStaffRoutes(app: FastifyInstance) {
       where.OR = [
         { user: { name: { contains: query.search, mode: "insensitive" } } },
         { employeeId: { contains: query.search, mode: "insensitive" } },
-        { department: { contains: query.search, mode: "insensitive" } },
-        { designation: { contains: query.search, mode: "insensitive" } },
+        { departmentRef: { name: { contains: query.search, mode: "insensitive" } } },
+        { designationRef: { name: { contains: query.search, mode: "insensitive" } } },
       ];
     }
 
     if (query.department) {
-      where.department = { contains: query.department, mode: "insensitive" };
+      where.departmentRef = { name: { contains: query.department, mode: "insensitive" } };
     }
 
     const staff = await prisma.staff.findMany({
       where,
       take: query.limit ? parseInt(query.limit) : undefined,
-      include: {
-        user: {
-          select: {
-            id: true, name: true, phone: true, email: true,
-            gender: true, avatarUrl: true, isActive: true, lastLoginAt: true,
-          },
-        },
-        classesAsTeacher: {
-          select: { id: true, name: true, academicYear: true },
-          where: { isActive: true },
-        },
-        subjects: {
-          select: { id: true, name: true },
-          where: { isActive: true },
-        },
-      },
+      include: STAFF_LIST_INCLUDE,
       orderBy: { user: { name: "asc" } },
     });
 
-    return reply.send({ success: true, data: { staff, total: staff.length } });
+    return reply.send({ success: true, data: { staff: staff.map(flattenStaff), total: staff.length } });
   }
 );
 
@@ -129,8 +211,8 @@ export async function adminStaffRoutes(app: FastifyInstance) {
         ["Phone", "YES", "10 digits", "Unique mobile number (used as default password)"],
         ["Email", "NO", "email@example.com", "Optional"],
         ["Gender", "NO", "Male / Female / Other", ""],
-        ["Designation", "YES", "Text", "e.g. Teacher, Principal, Librarian"],
-        ["Department", "YES", "Text", "e.g. Mathematics, Science, Administration"],
+        ["Designation", "YES", "Text", "e.g. Teacher, Principal, Librarian — created automatically if new"],
+        ["Department", "YES", "Text", "e.g. Mathematics, Science, Administration — created automatically if new"],
         ["Qualification", "NO", "Text", "e.g. M.Sc B.Ed"],
         ["Experience Years", "NO", "Number", "e.g. 5"],
         ["Employment Type", "NO", "PERMANENT / CONTRACT / PART_TIME / SUBSTITUTE", "Default: PERMANENT"],
@@ -181,7 +263,6 @@ export async function adminStaffRoutes(app: FastifyInstance) {
       }
 
       const { hashPassword } = await import("../../utils/auth.js");
-      const VALID_EMP_TYPES = ["PERMANENT", "CONTRACT", "PART_TIME", "SUBSTITUTE"];
 
       const results = {
         success: [] as number[],
@@ -258,9 +339,9 @@ export async function adminStaffRoutes(app: FastifyInstance) {
         }
 
         try {
-          const empType = VALID_EMP_TYPES.includes(row.employmentType?.toUpperCase() ?? "")
-            ? (row.employmentType!.toUpperCase() as any)
-            : "PERMANENT";
+          const departmentId = await resolveDepartmentId(schoolId, row.department);
+          const designationId = await resolveDesignationId(schoolId, row.designation, departmentId);
+          const empType = resolveEmployeeType(row.employmentType);
 
           await prisma.$transaction(async (tx) => {
             const user = await tx.user.create({
@@ -271,7 +352,7 @@ export async function adminStaffRoutes(app: FastifyInstance) {
                 email: row.email?.toLowerCase() || null,
                 passwordHash: await hashPassword(phone),
                 role: "TEACHER",
-                gender: mapGender(row.gender), // ← Fixed!
+                gender: mapGender(row.gender),
                 isActive: true,
               },
             });
@@ -281,11 +362,11 @@ export async function adminStaffRoutes(app: FastifyInstance) {
                 userId: user.id,
                 schoolId,
                 employeeId: row.employeeId.trim(),
-                designation: row.designation.trim(),
-                department: row.department.trim(),
+                designationId,
+                departmentId,
                 qualification: row.qualification?.trim() || null,
                 experienceYears: row.experienceYears ? parseInt(row.experienceYears) : 0,
-                employmentType: empType,
+                employeeType: empType as any,
                 salary: row.salary ? parseFloat(row.salary) : null,
                 joinDate: parseDate(row.joinDate ?? "") ?? new Date(),
                 isActive: true,
@@ -335,9 +416,11 @@ export async function adminStaffRoutes(app: FastifyInstance) {
             select: { id: true, name: true, section: true, academicYear: true },
             where: { isActive: true },
           },
-          subjects: {
-            select: { id: true, name: true, code: true },
+          departmentRef: { select: { name: true } },
+          designationRef: { select: { name: true } },
+          subjectAssignments: {
             where: { isActive: true },
+            select: { subject: { select: { id: true, name: true, code: true } } },
           },
         },
       });
@@ -349,7 +432,7 @@ export async function adminStaffRoutes(app: FastifyInstance) {
         });
       }
 
-      return reply.send({ success: true, data: { staff } });
+      return reply.send({ success: true, data: { staff: flattenStaff(staff) } });
     }
   );
 
@@ -429,11 +512,9 @@ export async function adminStaffRoutes(app: FastifyInstance) {
 
       const { hashPassword } = await import("../../utils/auth.js");
       const passwordHash = await hashPassword(body.password ?? body.phone ?? "Teacher@123");
-
-      const VALID_EMP_TYPES = ["PERMANENT", "CONTRACT", "PART_TIME", "SUBSTITUTE"];
-      const empType = VALID_EMP_TYPES.includes(body.employmentType?.toUpperCase() ?? "")
-        ? (body.employmentType!.toUpperCase() as any)
-        : "PERMANENT";
+      const empType = resolveEmployeeType(body.employmentType);
+      const departmentId = await resolveDepartmentId(schoolId, body.department);
+      const designationId = await resolveDesignationId(schoolId, body.designation, departmentId);
 
       const result = await prisma.$transaction(async (tx) => {
         const user = await tx.user.create({
@@ -444,7 +525,7 @@ export async function adminStaffRoutes(app: FastifyInstance) {
             email: body.email?.toLowerCase() ?? null,
             passwordHash,
             role: "TEACHER",
-            gender: mapGender(body.gender), // ← Fixed!
+            gender: mapGender(body.gender),
             isActive: true,
           },
         });
@@ -454,11 +535,11 @@ export async function adminStaffRoutes(app: FastifyInstance) {
             userId: user.id,
             schoolId,
             employeeId: body.employeeId.trim(),
-            designation: body.designation.trim(),
-            department: body.department.trim(),
+            designationId,
+            departmentId,
             qualification: body.qualification?.trim() ?? null,
             experienceYears: body.experienceYears ?? 0,
-            employmentType: empType,
+            employeeType: empType as any,
             salary: body.salary ?? null,
             joinDate: body.joinDate ? new Date(body.joinDate) : new Date(),
             isActive: true,
@@ -509,10 +590,9 @@ export async function adminStaffRoutes(app: FastifyInstance) {
         return reply.status(404).send({ success: false, message: "Staff member not found." });
       }
 
-      const VALID_EMP_TYPES = ["PERMANENT", "CONTRACT", "PART_TIME", "SUBSTITUTE"];
-      const empType = body.employmentType && VALID_EMP_TYPES.includes(body.employmentType.toUpperCase())
-        ? (body.employmentType.toUpperCase() as any)
-        : undefined;
+      const empType = body.employmentType ? resolveEmployeeType(body.employmentType) : undefined;
+      const departmentId = body.department !== undefined ? await resolveDepartmentId(schoolId, body.department) : undefined;
+      const designationId = body.designation !== undefined ? await resolveDesignationId(schoolId, body.designation, departmentId ?? undefined) : undefined;
 
       await prisma.$transaction(async (tx) => {
         await tx.user.update({
@@ -521,18 +601,18 @@ export async function adminStaffRoutes(app: FastifyInstance) {
             ...(body.name && { name: body.name.trim() }),
             ...(body.phone && { phone: body.phone }),
             ...(body.email && { email: body.email.toLowerCase() }),
-            ...(body.gender !== undefined && { gender: mapGender(body.gender) }), // ← Fixed!
+            ...(body.gender !== undefined && { gender: mapGender(body.gender) }),
           },
         });
 
         await tx.staff.update({
           where: { id: parseInt(id) },
           data: {
-            ...(body.designation && { designation: body.designation.trim() }),
-            ...(body.department && { department: body.department.trim() }),
+            ...(designationId !== undefined && { designationId }),
+            ...(departmentId !== undefined && { departmentId }),
             ...(body.qualification !== undefined && { qualification: body.qualification }),
             ...(body.experienceYears !== undefined && { experienceYears: body.experienceYears }),
-            ...(empType && { employmentType: empType }),
+            ...(empType && { employeeType: empType as any }),
             ...(body.salary !== undefined && { salary: body.salary }),
           },
         });
