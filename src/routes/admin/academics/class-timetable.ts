@@ -529,4 +529,59 @@ export async function adminClassTimetableRoutes(app: FastifyInstance) {
       });
     }
   );
+
+  // ── POST /admin/class-timetable/resync-times ──────────────
+  // One-time repair tool. Any PeriodSlot saved before the frontend fix
+  // (that deduped master periods across days and could pick up a stray
+  // dayOfWeek=0 row's time) has the WRONG startTime/duration baked in —
+  // teacher and subject assignments on it are fine, only the time is
+  // stale. This re-reads each slot's true time from its matching
+  // MasterPeriod (by dayOfWeek + periodNumber, Mon–Sat only) and
+  // corrects any mismatch. Safe to run repeatedly; touches nothing
+  // else on the slot.
+  app.post("/admin/class-timetable/resync-times",
+    { preHandler: [authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { schoolId } = request.user as any;
+      const body = (request.body ?? {}) as { academicYear?: string };
+
+      const slots = await prisma.periodSlot.findMany({
+        where: {
+          schoolId,
+          dayOfWeek: { gte: 1, lte: 6 },
+          ...(body.academicYear ? { academicYear: body.academicYear } : {}),
+        },
+      });
+      if (slots.length === 0) {
+        return reply.send({ success: true, message: "No period slots to check.", data: { checked: 0, fixed: 0 } });
+      }
+
+      const sessionNames = [...new Set(slots.map(s => s.academicYear))];
+      const masterPeriods = await prisma.masterPeriod.findMany({
+        where: { schoolId, sessionName: { in: sessionNames }, dayOfWeek: { gte: 1, lte: 6 } },
+      });
+      const byKey = new Map(
+        masterPeriods.map(p => [`${p.sessionName}-${p.dayOfWeek}-${p.serialNumber}`, p]),
+      );
+
+      let fixed = 0;
+      for (const s of slots) {
+        const correct = byKey.get(`${s.academicYear}-${s.dayOfWeek}-${s.periodNumber}`);
+        if (!correct) continue; // no matching master period defined — leave as is
+        if (correct.startTime !== s.startTime || correct.duration !== s.duration) {
+          await prisma.periodSlot.update({
+            where: { id: s.id },
+            data: { startTime: correct.startTime, duration: correct.duration },
+          });
+          fixed++;
+        }
+      }
+
+      return reply.send({
+        success: true,
+        message: fixed > 0 ? `${fixed} period slot(s) had a stale time — corrected.` : "Every slot's time already matches its master period.",
+        data: { checked: slots.length, fixed },
+      });
+    }
+  );
 }
