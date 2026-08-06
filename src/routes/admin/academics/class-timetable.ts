@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { prisma } from "../../lib/prisma.js";
-import { authenticate } from "../../middleware/authenticate.js";
+import { prisma } from "../../../lib/prisma.js";
+import { authenticate } from "../../../middleware/authenticate.js";
 
 // ── Subject Colors ──────────────────────────────────────────
 const SUBJECT_COLORS = [
