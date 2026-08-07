@@ -1,9 +1,37 @@
-// apps/api/src/routes/admin/finance-dashboard.ts
-
+// apps/api/src/routes/admin/finance/finance-dashboard.ts
+//
+// FIXED — same root cause as the fee-collection.ts fix: every "due /
+// pending / overdue" figure here was computed from Invoice.dueAmount,
+// but Invoice rows only exist for transactions that have actually
+// happened. A student who was assigned a fee plan but hasn't paid
+// anything yet has ZERO Invoice rows — so they contributed nothing to
+// "Fees Pending" even though they may owe the most. That's why this
+// dashboard showed ₹6K pending and most classes at ₹0/₹0, while the
+// main Dashboard (which already read StudentFeeInstallment correctly)
+// showed the real number, ₹3,88,000, for the same school.
+//
+// FIX: every due/pending/overdue figure now sources from
+// StudentFeeInstallment / StudentFeePlan — the real per-installment
+// ledger — matching what fee-collection.ts writes to and what the
+// main dashboard already reads. "Collected" figures keep reading from
+// Payment/FeeReceipt, which — unlike Invoice — really are created for
+// every real transaction, so those were never the problem.
+//
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { prisma } from "../../../lib/prisma.js";
 import { authenticate } from "../../../middleware/authenticate.js";
 import { requireCapability } from "../../../middleware/checkCapability.js";
+
+async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+  try { return await fn(); }
+  catch (err: any) { console.log("[finance-dashboard]", err?.message ?? err); return fallback; }
+}
+
+/** dueAmount + fineAmount - discountAmount - paidAmount, floored at 0 —
+ *  the same "net still owed" formula used everywhere else in Finance. */
+function netDue(agg: { dueAmount: any; paidAmount: any; fineAmount: any; discountAmount: any }) {
+  return Math.max(0, Number(agg.dueAmount ?? 0) + Number(agg.fineAmount ?? 0) - Number(agg.discountAmount ?? 0) - Number(agg.paidAmount ?? 0));
+}
 
 export async function adminFinanceDashboardRoutes(app: FastifyInstance) {
 
@@ -21,8 +49,10 @@ export async function adminFinanceDashboardRoutes(app: FastifyInstance) {
         collectedAll,
         paidToday,
         onlineTotal,
-        pendingInvoices,
-        overdueInvoices,
+        dueAgg,
+        overdueAgg,
+        overduePlanCount,
+        pendingPlanCount,
         discountTotal,
         fineCollected,
         refundTotal,
@@ -32,66 +62,86 @@ export async function adminFinanceDashboardRoutes(app: FastifyInstance) {
         alerts,
       ] = await Promise.all([
         // Total active students
-        prisma.student.count({ where: { schoolId, isActive: true } }),
+        safe(() => prisma.student.count({ where: { schoolId, isActive: true } }), 0),
 
-        // Total collected (all time, current year)
-        prisma.payment.aggregate({
+        // Total collected (all time, current year) — real transactions, Payment is fine
+        safe(() => prisma.payment.aggregate({
           where: { invoice: { schoolId, academicYear: { startDate: { gte: yearStart } } } },
           _sum: { amount: true },
-        }),
+        }), { _sum: { amount: null } } as any),
 
         // Collected today
-        prisma.payment.aggregate({
+        safe(() => prisma.payment.aggregate({
           where: { invoice: { schoolId }, paidAt: { gte: todayStart } },
           _sum: { amount: true },
-        }),
+        }), { _sum: { amount: null } } as any),
 
         // Online collections (UPI + ONLINE + BANK_TRANSFER this month)
-        prisma.payment.aggregate({
+        safe(() => prisma.payment.aggregate({
           where: { invoice: { schoolId }, method: { in: ["UPI","ONLINE","BANK_TRANSFER"] }, paidAt: { gte: monthStart } },
           _sum: { amount: true },
-        }),
+        }), { _sum: { amount: null } } as any),
 
-        // Pending invoices amount
-        prisma.invoice.aggregate({
-          where: { schoolId, status: { in: ["PENDING","PARTIAL"] } },
-          _sum: { dueAmount: true }, _count: true,
-        }),
+        // FIXED: total still owed across every unpaid/partial installment —
+        // this is the real "Fees Pending" figure, not Invoice.dueAmount.
+        safe(() => prisma.studentFeeInstallment.aggregate({
+          where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, studentPlan: { isActive: true } },
+          _sum: { dueAmount: true, paidAmount: true, fineAmount: true, discountAmount: true },
+        }), { _sum: { dueAmount: null, paidAmount: null, fineAmount: null, discountAmount: null } } as any),
 
-        // Overdue invoices
-        prisma.invoice.aggregate({
-          where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, dueDate: { lt: now } },
-          _sum: { dueAmount: true }, _count: true,
-        }),
+        // FIXED: overdue = past due date and not fully settled — same source.
+        safe(() => prisma.studentFeeInstallment.aggregate({
+          where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, dueDate: { lt: now }, studentPlan: { isActive: true } },
+          _sum: { dueAmount: true, paidAmount: true, fineAmount: true, discountAmount: true },
+        }), { _sum: { dueAmount: null, paidAmount: null, fineAmount: null, discountAmount: null } } as any),
+
+        // Distinct students overdue (for the alert count) rather than
+        // installment count — "3 students have overdue fees" reads better
+        // than "3 installments", and matches how the banner phrases it.
+        safe(async () => {
+          const rows = await prisma.studentFeeInstallment.findMany({
+            where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, dueDate: { lt: now }, studentPlan: { isActive: true } },
+            select: { studentId: true }, distinct: ["studentId"],
+          });
+          return rows.length;
+        }, 0),
+
+        safe(async () => {
+          const rows = await prisma.studentFeeInstallment.findMany({
+            where: { schoolId, status: { in: ["PENDING","PARTIAL"] }, studentPlan: { isActive: true } },
+            select: { studentId: true }, distinct: ["studentId"],
+          });
+          return rows.length;
+        }, 0),
 
         // Total discounts given
-        prisma.feeDiscount.aggregate({
+        safe(() => prisma.feeDiscount.aggregate({
           where: { schoolId, isActive: true },
           _sum: { value: true },
-        }),
+        }), { _sum: { value: null } } as any),
 
         // Fines collected
-        prisma.feeFine.aggregate({
+        safe(() => prisma.feeFine.aggregate({
           where: { schoolId, isPaid: true },
           _sum: { amount: true },
-        }),
+        }), { _sum: { amount: null } } as any),
 
         // Refunds processed
-        prisma.feeRefund.aggregate({
+        safe(() => prisma.feeRefund.aggregate({
           where: { schoolId, status: "PROCESSED" },
           _sum: { amount: true },
-        }),
+        }), { _sum: { amount: null } } as any),
 
         // By payment mode (this month)
-        prisma.payment.groupBy({
+        safe(() => prisma.payment.groupBy({
           by: ["method"],
           where: { invoice: { schoolId }, paidAt: { gte: monthStart } },
           _sum: { amount: true },
           _count: true,
-        }),
+        }), [] as any[]),
 
         // Recent 10 transactions
-        prisma.payment.findMany({
+        safe(() => prisma.payment.findMany({
           where: { invoice: { schoolId } },
           orderBy: { paidAt: "desc" },
           take: 10,
@@ -101,67 +151,97 @@ export async function adminFinanceDashboardRoutes(app: FastifyInstance) {
             },
             receivedBy: { select: { name: true } },
           },
-        }),
+        }), [] as any[]),
 
-        // Class-wise collection (top 8 classes)
-        prisma.$queryRaw<{ classId: number; className: string; collected: number; due: number }[]>`
+        // FIXED: class-wise collected vs due, now via
+        // StudentFeeInstallment so a class full of students who
+        // haven't paid yet still shows its real due amount instead of
+        // ₹0 (Invoice rows didn't exist for them at all before).
+        safe(() => prisma.$queryRaw<{ classId: number; className: string; collected: number; due: number }[]>`
           SELECT
             c.id AS "classId",
-            CONCAT(c.name) AS "className",
-            COALESCE(SUM(p.amount), 0) AS collected,
-            COALESCE(SUM(i."dueAmount"), 0) AS due
+            c.name AS "className",
+            COALESCE(pay.collected, 0) AS collected,
+            COALESCE(inst.due, 0) AS due
           FROM classes c
-          LEFT JOIN students s ON s."classId" = c.id AND s."schoolId" = ${schoolId}
-          LEFT JOIN invoices i ON i."studentId" = s.id AND i."schoolId" = ${schoolId}
-          LEFT JOIN payments p ON p."invoiceId" = i.id
+          LEFT JOIN (
+            SELECT s."classId" AS "classId", SUM(p.amount) AS collected
+            FROM payments p
+            JOIN invoices i ON i.id = p."invoiceId"
+            JOIN students s ON s.id = i."studentId"
+            WHERE i."schoolId" = ${schoolId}
+            GROUP BY s."classId"
+          ) pay ON pay."classId" = c.id
+          LEFT JOIN (
+            SELECT s."classId" AS "classId",
+              SUM(GREATEST(0, sfi."dueAmount" + sfi."fineAmount" - sfi."discountAmount" - sfi."paidAmount")) AS due
+            FROM student_fee_installments sfi
+            JOIN students s ON s.id = sfi."studentId"
+            JOIN student_fee_plans sfp ON sfp.id = sfi."studentPlanId" AND sfp."isActive" = true
+            WHERE sfi."schoolId" = ${schoolId} AND sfi.status IN ('PENDING','PARTIAL','OVERDUE')
+            GROUP BY s."classId"
+          ) inst ON inst."classId" = c.id
           WHERE c."schoolId" = ${schoolId} AND c."isActive" = true
-          GROUP BY c.id, c.name
-          ORDER BY collected DESC
+          ORDER BY due DESC, collected DESC
           LIMIT 8
-        `.catch(() => [] as any[]),
+        `, [] as any[]),
 
         // Alerts
         Promise.all([
-          prisma.invoice.count({ where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, dueDate: { lt: now } } }),
-          prisma.payment.count({ where: { invoice: { schoolId }, method: "CHEQUE", paidAt: { gte: monthStart } } }),
-          prisma.feeRefund.count({ where: { schoolId, status: { in: ["REQUESTED","UNDER_REVIEW"] } } }),
+          safe(async () => {
+            const rows = await prisma.studentFeeInstallment.findMany({
+              where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, dueDate: { lt: now }, studentPlan: { isActive: true } },
+              select: { studentId: true }, distinct: ["studentId"],
+            });
+            return rows.length;
+          }, 0),
+          safe(() => prisma.payment.count({ where: { invoice: { schoolId }, method: "CHEQUE", paidAt: { gte: monthStart } } }), 0),
+          safe(() => prisma.feeRefund.count({ where: { schoolId, status: { in: ["REQUESTED","UNDER_REVIEW"] } } }), 0),
         ]),
       ]);
 
-      // 6-month revenue trend
+      // 6-month revenue trend — collected stays Payment-based (real
+      // transactions that happened in that month); pending is now the
+      // installments that fell due in that month, same fixed source.
       const trend: { label: string; collected: number; pending: number }[] = [];
       for (let i = 5; i >= 0; i--) {
-        const d1 = new Date(); d1.setDate(1); d1.setMonth(d1.getMonth() - i);
+        const d1 = new Date(); d1.setDate(1); d1.setMonth(d1.getMonth() - i); d1.setHours(0,0,0,0);
         const d2 = new Date(d1); d2.setMonth(d2.getMonth() + 1);
         const [col, pen] = await Promise.all([
-          prisma.payment.aggregate({ where: { invoice: { schoolId }, paidAt: { gte: d1, lt: d2 } }, _sum: { amount: true } }),
-          prisma.invoice.aggregate({ where: { schoolId, issuedDate: { gte: d1, lt: d2 }, status: { not: "CANCELLED" } }, _sum: { dueAmount: true } }),
+          safe(() => prisma.payment.aggregate({ where: { invoice: { schoolId }, paidAt: { gte: d1, lt: d2 } }, _sum: { amount: true } }), { _sum: { amount: null } } as any),
+          safe(() => prisma.studentFeeInstallment.aggregate({
+            where: { schoolId, dueDate: { gte: d1, lt: d2 }, studentPlan: { isActive: true } },
+            _sum: { dueAmount: true, paidAmount: true, fineAmount: true, discountAmount: true },
+          }), { _sum: { dueAmount: null, paidAmount: null, fineAmount: null, discountAmount: null } } as any),
         ]);
         trend.push({
           label: d1.toLocaleDateString("en-IN", { month: "short", year: "2-digit" }),
           collected: Number(col._sum.amount ?? 0),
-          pending:   Number(pen._sum.dueAmount ?? 0),
+          pending: netDue(pen._sum),
         });
       }
+
+      const feesPending = netDue(dueAgg._sum);
+      const overdueAmount = netDue(overdueAgg._sum);
 
       return reply.send({ success: true, data: {
         kpi: {
           totalStudents,
           feesCollected:   Number(collectedAll._sum.amount ?? 0),
-          feesPending:     Number(pendingInvoices._sum.dueAmount ?? 0),
-          pendingCount:    pendingInvoices._count,
+          feesPending,
+          pendingCount:    pendingPlanCount,
           collectionToday: Number(paidToday._sum.amount ?? 0),
-          overdueAmount:   Number(overdueInvoices._sum.dueAmount ?? 0),
-          overdueCount:    overdueInvoices._count,
+          overdueAmount,
+          overdueCount:    overduePlanCount,
           onlineCollections: Number(onlineTotal._sum.amount ?? 0),
           discountsGiven:  Number(discountTotal._sum.value ?? 0),
           finesCollected:  Number(fineCollected._sum.amount ?? 0),
           refundsProcessed: Number(refundTotal._sum.amount ?? 0),
         },
         trend,
-        byPaymentMode: byPaymentMode.map(b => ({ mode: b.method, amount: Number(b._sum.amount ?? 0), count: b._count })),
-        classWise: Array.isArray(classWise) ? classWise.map(c => ({ ...c, collected: Number(c.collected), due: Number(c.due) })) : [],
-        recentPayments: recentPayments.map(p => ({
+        byPaymentMode: byPaymentMode.map((b: any) => ({ mode: b.method, amount: Number(b._sum.amount ?? 0), count: b._count })),
+        classWise: Array.isArray(classWise) ? classWise.map((c: any) => ({ ...c, collected: Number(c.collected), due: Number(c.due) })) : [],
+        recentPayments: recentPayments.map((p: any) => ({
           receiptNo: p.receiptNumber,
           studentName: p.invoice.student?.user.name,
           amount: Number(p.amount),
@@ -179,26 +259,32 @@ export async function adminFinanceDashboardRoutes(app: FastifyInstance) {
   );
 
   // ─── GET /admin/finance/dashboard/class-collection ────────
+  // FIXED: same Invoice→StudentFeeInstallment swap for "pending".
   app.get("/admin/finance/dashboard/class-collection", { preHandler: [authenticate, requireCapability('finance.collection')] },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { schoolId } = req.user as any;
       const q = req.query as { academicYearId?: string };
-      const where: any = { schoolId };
-      if (q.academicYearId) where.academicYearId = parseInt(q.academicYearId);
 
       const classes = await prisma.class.findMany({ where: { schoolId, isActive: true }, select: { id: true, name: true } });
       const result = await Promise.all(classes.map(async cls => {
         const [collected, pending] = await Promise.all([
-          prisma.payment.aggregate({ where: { invoice: { ...where, student: { classId: cls.id } } }, _sum: { amount: true } }),
-          prisma.invoice.aggregate({ where: { ...where, student: { classId: cls.id }, status: { not: "CANCELLED" } }, _sum: { dueAmount: true } }),
+          safe(() => prisma.payment.aggregate({ where: { invoice: { schoolId, student: { classId: cls.id } } }, _sum: { amount: true } }), { _sum: { amount: null } } as any),
+          safe(() => prisma.studentFeeInstallment.aggregate({
+            where: {
+              schoolId, student: { classId: cls.id }, status: { in: ["PENDING","PARTIAL","OVERDUE"] },
+              studentPlan: { isActive: true, ...(q.academicYearId ? { academicYearId: parseInt(q.academicYearId) } : {}) },
+            },
+            _sum: { dueAmount: true, paidAmount: true, fineAmount: true, discountAmount: true },
+          }), { _sum: { dueAmount: null, paidAmount: null, fineAmount: null, discountAmount: null } } as any),
         ]);
-        return { classId: cls.id, className: cls.name, collected: Number(collected._sum.amount ?? 0), pending: Number(pending._sum.dueAmount ?? 0) };
+        return { classId: cls.id, className: cls.name, collected: Number(collected._sum.amount ?? 0), pending: netDue(pending._sum) };
       }));
       return reply.send({ success: true, data: { classes: result.sort((a,b) => b.collected - a.collected) } });
     }
   );
 
   // ─── GET /admin/finance/dashboard/collection-by-date ──────
+  // Unchanged — this one was always Payment-based, which is correct.
   app.get("/admin/finance/dashboard/collection-by-date", { preHandler: [authenticate, requireCapability('finance.collection')] },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { schoolId } = req.user as any;
