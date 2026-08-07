@@ -51,7 +51,27 @@ export async function sendPushNotifications(
         body: JSON.stringify(batch),
       });
       const json: any = await res.json();
+
+      // FIXED: Expo can reject the whole batch with a top-level `errors`
+      // array (e.g. malformed request, or — for Android — "Unable to
+      // retrieve the FCM server key" if Firebase isn't wired up in the
+      // EAS project) instead of the usual per-message `data[]` array.
+      // That case used to fall straight through with an empty `results`
+      // array, so nothing got logged and `sent`/`failed` both stayed 0 —
+      // a real delivery failure that looked identical to "nothing to send".
+      if (json?.errors?.length) {
+        failed += batch.length;
+        console.log("[push] Expo rejected the batch:", JSON.stringify(json.errors));
+        continue;
+      }
+
       const results = json?.data ?? [];
+      if (results.length === 0 && batch.length > 0) {
+        failed += batch.length;
+        console.log("[push] Expo returned no per-message results for a non-empty batch — raw response:", JSON.stringify(json));
+        continue;
+      }
+
       results.forEach((r: any, i: number) => {
         if (r.status === "ok") sent++;
         else {
