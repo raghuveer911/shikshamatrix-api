@@ -184,7 +184,7 @@ export async function getAllowedContacts(
         if (ids.length > 0) {
           const students = await safe("teacher's students", () =>
             prisma.student.findMany({
-              where: { classId: { in: ids }, isActive: true },
+              where: { schoolId, classId: { in: ids }, isActive: true },
               select: { class: { select: { name: true, section: true } }, user: { select: { id: true, name: true, role: true } } },
               take: 40,
             }), [] as any[]);
@@ -219,7 +219,7 @@ export async function getAllowedContacts(
           const studentIds = (stops ?? []).flatMap((s: any) => (s.studentAssignments ?? []).map((a: any) => a.studentId));
           if (studentIds.length === 0) return [];
           return prisma.student.findMany({
-            where: { id: { in: studentIds } },
+            where: { id: { in: studentIds }, schoolId },
             select: { user: { select: { id: true, name: true, role: true } } },
           });
         }, [] as any[]);
