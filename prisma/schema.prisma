@@ -9496,7 +9496,8 @@ model CommTemplate {
   createdById Int?
   createdAt   DateTime               @default(now())
   updatedAt   DateTime               @updatedAt
-
+  metaTemplateName     String? @db.VarChar(200)
+  metaTemplateLanguage String? @db.VarChar(10) @default("en")
   broadcasts CommBroadcast[]
   versions   CommTemplateVersion[]
 
@@ -9581,7 +9582,7 @@ model CommDelivery {
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
   sourceCategory String? @db.VarChar(30)
-  
+
   @@index([broadcastId])
   @@index([broadcastId, status])
   @@index([userId])

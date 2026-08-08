@@ -75,6 +75,11 @@ export async function adminCommTemplatesRoutes(app: FastifyInstance) {
           channels:    b.channels as any[] ?? [],
           isDefault:   b.isDefault ?? false,
           createdById: Number(userId),
+          // ADDED: only meaningful when WHATSAPP is one of the
+          // channels — the Meta Business Manager-approved template
+          // this maps to.
+          metaTemplateName:     b.metaTemplateName ?? null,
+          metaTemplateLanguage: b.metaTemplateLanguage ?? "en",
         },
       });
 
@@ -121,6 +126,9 @@ export async function adminCommTemplatesRoutes(app: FastifyInstance) {
           channels:  b.channels as any[],
           isDefault: b.isDefault,
           isActive:  b.isActive,
+          // ADDED — see POST above.
+          metaTemplateName:     b.metaTemplateName,
+          metaTemplateLanguage: b.metaTemplateLanguage,
         },
       });
 
