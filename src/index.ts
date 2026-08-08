@@ -262,6 +262,7 @@ import { adminHostelRoomsInsightRoutes } from "./routes/admin/hostel/hostel-room
 import { adminHostelAllocationInsightRoutes } from "./routes/admin/hostel/hostel-allocation-insights.js";
 import { adminHostelHostelsInsightRoutes } from "./routes/admin/hostel/hostel-hostels-insights.js";
 import { adminTransportFeesRoutes } from "./routes/admin/finance/transport-fees.js";
+import { adminWhatsAppTemplatesRoutes } from "./routes/admin/communication/whatsapp-templates-api.js";
 async function buildApp() {
   const app = Fastify({ logger: false });
 
@@ -274,6 +275,7 @@ async function buildApp() {
   });
 
   // Routes
+  await app.register(adminWhatsAppTemplatesRoutes);
   await app.register(adminTransportFeesRoutes);
   await app.register(adminHostelHostelsInsightRoutes);
   await app.register(adminHostelRoomsInsightRoutes);
