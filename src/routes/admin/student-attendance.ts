@@ -24,6 +24,12 @@ const STATUS_LABEL: Record<string, string> = {
 const STATUS_PRIORITY: Record<string, "NORMAL" | "HIGH"> = {
   ABSENT: "HIGH", LATE: "NORMAL", HALF_DAY: "NORMAL",
 };
+// ADDED: maps to SystemWhatsAppTemplate.eventKey — HALF_DAY has no
+// catalogue entry yet, so it just gets in-app/push, no WhatsApp
+// (fanOutNotification skips cleanly when whatsappEventKey is undefined).
+const STATUS_WHATSAPP_EVENT: Record<string, string | undefined> = {
+  ABSENT: "STUDENT_ABSENT", LATE: "STUDENT_LATE", HALF_DAY: undefined,
+};
 
 export async function adminStudentAttendanceRoutes(app: FastifyInstance) {
 
@@ -250,9 +256,10 @@ export async function adminStudentAttendanceRoutes(app: FastifyInstance) {
           try {
             const studentRows = await prisma.student.findMany({
               where: { id: { in: toNotify.map(a => a.studentId) } },
-              include: { user: { select: { name: true } } },
+              include: { user: { select: { name: true } }, parentDetail: { select: { fatherName: true } } },
             });
             const nameById = new Map(studentRows.map(s => [s.id, s.user.name]));
+            const parentNameById = new Map(studentRows.map(s => [s.id, s.parentDetail?.fatherName || "Parent"]));
 
             for (const a of toNotify) {
               const parentUserIds = await resolveParentUserIdsForStudent(a.studentId);
@@ -269,6 +276,10 @@ export async function adminStudentAttendanceRoutes(app: FastifyInstance) {
                 title: `Attendance update — ${name}`,
                 body: `${name} was ${STATUS_LABEL[a.status]} today (${dateStr}).${a.remarks ? ` Note: ${a.remarks}` : ""}`,
                 actionUrl: `/parent/attendance?studentId=${a.studentId}&date=${dateStr}`,
+                // WhatsApp — placeholder order matches the STUDENT_ABSENT/
+                // STUDENT_LATE catalogue entries: ["Parent Name", "Student Name", "Date"].
+                whatsappEventKey: STATUS_WHATSAPP_EVENT[a.status],
+                whatsappParams: [parentNameById.get(a.studentId) ?? "Parent", name, dateStr],
               });
             }
           } catch (err: any) {

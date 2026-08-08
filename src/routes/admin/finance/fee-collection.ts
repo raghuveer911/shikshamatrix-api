@@ -380,7 +380,7 @@ export async function adminFeeCollectionRoutes(app: FastifyInstance) {
         const parentUserIds = await resolveParentUserIdsForStudent(body.studentId);
         if (parentUserIds.length === 0) return;
         const student = await prisma.student.findFirst({
-          where: { id: body.studentId }, include: { user: { select: { name: true } } },
+          where: { id: body.studentId }, include: { user: { select: { name: true } }, parentDetail: { select: { fatherName: true } } },
         });
         await fanOutNotification({
           schoolId,
@@ -393,6 +393,17 @@ export async function adminFeeCollectionRoutes(app: FastifyInstance) {
           title: "Fee payment received",
           body: `₹${body.paymentAmount.toLocaleString("en-IN")} received for ${student?.user?.name ?? "your child"}. Receipt ${receiptNo}.${dueAfter > 0 ? ` ₹${dueAfter.toLocaleString("en-IN")} still due.` : ""}`,
           actionUrl: `/parent/fees?studentId=${body.studentId}`,
+          // WhatsApp — placeholder order matches the FEE_RECEIPT catalogue
+          // entry: ["Parent Name", "Amount", "Student Name", "Receipt No"].
+          // Cleanly skipped by fanOutNotification if the school hasn't
+          // enabled this event yet.
+          whatsappEventKey: "FEE_RECEIPT",
+          whatsappParams: [
+            student?.parentDetail?.fatherName || "Parent",
+            body.paymentAmount.toLocaleString("en-IN"),
+            student?.user?.name ?? "your child",
+            receiptNo,
+          ],
         });
       } catch (err: any) {
         console.log("[fee-collection] parent notification failed:", err?.message ?? err);

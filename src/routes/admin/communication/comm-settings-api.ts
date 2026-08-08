@@ -5,6 +5,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { prisma } from "../../../lib/prisma.js";
 import { authenticate } from "../../../middleware/authenticate.js";
 import { testWhatsAppConnection } from "../../../services/whatsapp.service.js";
+import { syncSchoolTemplates } from "../../../services/whatsapp-templates.service.js";
 
 export async function adminCommSettingsRoutes(app: FastifyInstance) {
   const P = "/admin/comm/settings";
@@ -327,6 +328,15 @@ export async function adminCommSettingsRoutes(app: FastifyInstance) {
         where: { id, schoolId },
         data: { lastTestedAt: new Date(), lastTestOk: isOk, testError: error },
       });
+
+      // ADDED: a successful credential test is the natural trigger to
+      // start checking/submitting the managed template catalogue —
+      // the school shouldn't have to separately go find a "sync"
+      // button right after connecting. Runs in the background; a
+      // slow Meta API response never delays the test result itself.
+      if (isOk && config.type === "WHATSAPP_API") {
+        syncSchoolTemplates(schoolId).catch((err) => console.log("[comm-settings] template sync after test failed:", err?.message ?? err));
+      }
 
       return rep.send({ ok: isOk, error, testedAt: new Date() });
     }

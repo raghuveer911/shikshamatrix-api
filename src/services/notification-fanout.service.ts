@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma.js";
 import { resolveAudienceUserIds, AudienceInput } from "./audience.service.js";
 import { sendPushNotifications } from "./push-notification.service.js";
 import { sendWhatsAppMessage } from "./whatsapp.service.js";
+import { getEnabledTemplateForEvent } from "./whatsapp-templates.service.js";
 
 export interface FanOutInput extends AudienceInput {
   schoolId: number;
@@ -16,14 +17,17 @@ export interface FanOutInput extends AudienceInput {
    *  notification list/bell can redirect on click, and passed through
    *  to the push payload so the mobile app can deep-link on tap too. */
   actionUrl?: string | null;
-  /** ADDED: WhatsApp only sends if this is provided. Free text is NOT
-   *  an option here — Meta requires a pre-approved message template
-   *  for anything the school initiates (this is always
-   *  business-initiated, never a reply), so there's no free-text
-   *  fallback to silently degrade to. Omit this and WhatsApp is
-   *  simply skipped for the call, same as if the school hasn't
-   *  turned WhatsApp on at all. */
-  whatsappTemplate?: { name: string; language?: string; params?: string[] } | null;
+  /** CHANGED: was `whatsappTemplate: {name, language, params}` where
+   *  the caller had to know Meta's exact template name. Now callers
+   *  just say WHICH event this is (must match a
+   *  SystemWhatsAppTemplate.eventKey, e.g. "FEE_RECEIPT",
+   *  "STUDENT_ABSENT") and supply the positional values in the same
+   *  order as that template's placeholderLabels — the actual Meta
+   *  template name/language for this school is looked up
+   *  automatically via getEnabledTemplateForEvent, and WhatsApp is
+   *  cleanly skipped (not faked) if the school hasn't enabled it yet. */
+  whatsappEventKey?: string | null;
+  whatsappParams?: string[];
 }
 
 // Returns the number of recipients notified. Silently notifies zero people
@@ -63,18 +67,22 @@ export async function fanOutNotification(input: FanOutInput): Promise<number> {
     }).catch((err) => console.log("[fanOutNotification] push send failed:", err?.message ?? err));
   }
 
-  // ── WhatsApp — only when the school has it on AND the caller gave
-  // an approved template. Runs in the background; never blocks or
-  // fails the rest of the notification. ──
-  if (input.whatsappTemplate && commSettings?.whatsappNotificationsEnabled) {
+  // ── WhatsApp — only when the school has this specific event
+  // enabled AND Meta has approved the managed template for it. Runs
+  // in the background; never blocks or fails the rest of the
+  // notification. ──
+  if (input.whatsappEventKey && commSettings?.whatsappNotificationsEnabled) {
     (async () => {
+      const tmpl = await getEnabledTemplateForEvent(input.schoolId, input.whatsappEventKey!);
+      if (!tmpl) return; // not approved / not enabled — skip cleanly, don't fake it
+
       const recipients = await prisma.user.findMany({ where: { id: { in: userIds }, phone: { not: null } }, select: { id: true, phone: true } });
       for (const r of recipients) {
         if (!r.phone) continue;
         await sendWhatsAppMessage({
           schoolId: input.schoolId, to: r.phone, userId: r.id, mode: "TEMPLATE",
-          templateName: input.whatsappTemplate!.name, templateLanguage: input.whatsappTemplate!.language,
-          templateParams: input.whatsappTemplate!.params, sourceCategory: input.category,
+          templateName: tmpl.metaTemplateName, templateLanguage: tmpl.metaLanguage,
+          templateParams: input.whatsappParams, sourceCategory: input.category,
         }).catch((err) => console.log("[fanOutNotification] whatsapp send failed:", err?.message ?? err));
       }
     })();
