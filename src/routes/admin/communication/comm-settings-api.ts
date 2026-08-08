@@ -261,16 +261,32 @@ export async function adminCommSettingsRoutes(app: FastifyInstance) {
       const id = Number((req.params as any).id);
       const b = req.body as any;
 
+      const existing = await prisma.commChannelConfig.findFirst({ where: { id, schoolId } });
+      if (!existing) return rep.status(404).send({ error: "Channel not found." });
+
       if (b.isPrimary) {
-        const existing = await prisma.commChannelConfig.findFirst({ where: { id, schoolId } });
-        if (existing) {
-          await prisma.commChannelConfig.updateMany({ where: { schoolId, type: existing.type }, data: { isPrimary: false } });
-        }
+        await prisma.commChannelConfig.updateMany({ where: { schoolId, type: existing.type }, data: { isPrimary: false } });
+      }
+
+      // FIXED: was `config: b.config` — a blind overwrite of the whole
+      // JSON blob. Sensitive fields (API key/token/password) are
+      // intentionally sent blank by the frontend when the user isn't
+      // changing them ("leave blank to keep existing"), and
+      // non-sensitive fields like Phone Number ID only round-trip
+      // correctly once the frontend pre-fills them — but even then, a
+      // blind overwrite here would drop the API key the moment any
+      // other field changed. Merge instead: only keys with a real,
+      // non-empty value in the request replace what's already saved.
+      const existingConfig = (existing.config as Record<string, any>) ?? {};
+      const incomingConfig = (b.config as Record<string, any>) ?? {};
+      const mergedConfig = { ...existingConfig };
+      for (const [k, v] of Object.entries(incomingConfig)) {
+        if (v !== undefined && v !== null && v !== "") mergedConfig[k] = v;
       }
 
       const config = await prisma.commChannelConfig.update({
         where: { id, schoolId },
-        data: { name: b.name, config: b.config, isPrimary: b.isPrimary, isActive: b.isActive },
+        data: { name: b.name, config: mergedConfig, isPrimary: b.isPrimary, isActive: b.isActive },
       });
       return rep.send({ config: { ...config, config: maskConfig(config.config as Record<string, any>) } });
     }
