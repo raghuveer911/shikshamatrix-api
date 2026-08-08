@@ -2358,6 +2358,24 @@ enum FeeInstallmentSource {
  PLAN
  TRANSPORT
 }
+enum WhatsAppTemplateCategory {
+ AUTHENTICATION
+ MARKETING
+ UTILITY
+}
+
+enum SchoolTemplateStatus {
+ NOT_SUBMITTED
+ PENDING
+ APPROVED
+ REJECTED
+ PAUSED 
+}
+enum NotificationSourceType {
+  NOTICE
+  BROADCAST
+  SYSTEM
+}
 
 // ─────────────────────────────────────────
 // PLATFORM LEVEL
@@ -2647,6 +2665,7 @@ model School {
   profileFieldChangeLogs ProfileFieldChangeLog[]
   workingDayOverrides    WorkingDayOverride[]
   studentTransportAssignments StudentTransportAssignment[]
+  whatsappTemplateStatuses SchoolWhatsAppTemplateStatus[]
 
   @@index([status])
   @@index([city, state])
@@ -12533,17 +12552,42 @@ model NotificationSettings {
   @@map("notification_settings")
 }
 
-// ─────────────────────────────────────────
-// NOTIFICATION INBOX (per-user)
-// ─────────────────────────────────────────
-// Created by fan-out when a CommNotice is published or a CommBroadcast is
-// sent — one row per recipient, so the dashboard "Notifications" page has
-// something concrete to read/paginate/mark-read, independent of the
-// source Notice/Broadcast record.
-enum NotificationSourceType {
-  NOTICE
-  BROADCAST
-  SYSTEM
+model SystemWhatsAppTemplate {
+ id                Int                       @id @default(autoincrement())
+ eventKey          String                    @unique @db.VarChar(50)
+ label             String                    @db.VarChar(100) // "Student Absent" — shown to school admins
+ description       String?                   @db.VarChar(300)
+ metaTemplateName  String                    @db.VarChar(200)
+ metaLanguage      String                    @default("en") @db.VarChar(10)
+ category          WhatsAppTemplateCategory  @default(UTILITY)
+ bodyText          String                    @db.VarChar(1024) // Meta body with {{1}}, {{2}}... placeholders
+ placeholderLabels String[]                  // human labels, same order as {{1}},{{2}} — for admin-facing preview only
+ isActive          Boolean                   @default(true)
+ createdAt         DateTime                  @default(now())
+ updatedAt         DateTime                  @updatedAt
+
+ schoolStatuses SchoolWhatsAppTemplateStatus[]
+ @@map("system_whatsapp_templates")
+}
+
+model SchoolWhatsAppTemplateStatus {
+ id                Int                      @id @default(autoincrement())
+ schoolId          Int
+ school            School                   @relation(fields: [schoolId], references: [id])
+ systemTemplateId  Int
+ systemTemplate    SystemWhatsAppTemplate   @relation(fields: [systemTemplateId], references: [id])
+ metaTemplateId    String?                  @db.VarChar(100)
+ status            SchoolTemplateStatus     @default(NOT_SUBMITTED)
+ rejectionReason   String?                  @db.VarChar(500)
+ isEnabled         Boolean                  @default(false)
+ submittedAt       DateTime?
+ approvedAt        DateTime?
+ lastCheckedAt     DateTime?
+ createdAt         DateTime                 @default(now())
+ updatedAt         DateTime                 @updatedAt
+ @@unique([schoolId, systemTemplateId])
+ @@index([schoolId])
+ @@map("school_whatsapp_template_status")
 }
 
 model Notification {
