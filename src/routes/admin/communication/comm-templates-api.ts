@@ -1,103 +1,354 @@
-// apps/api/src/routes/admin/communication/whatsapp-templates-api.ts
-// ─────────────────────────────────────────────────────────────
-// What the simplified school-admin UI talks to — no template names
-// or bodies ever appear here, just event labels + status + an
-// Enable toggle. All the Meta-facing work happens in
-// whatsapp-templates.service.ts.
-// ─────────────────────────────────────────────────────────────
+// apps/api/src/routes/admin/communication/comm-templates-api.ts
+// Pure TypeScript — NO JSX, NO className
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { prisma } from "../../../lib/prisma.js";
 import { authenticate } from "../../../middleware/authenticate.js";
-import { syncSchoolTemplates, refreshTemplateStatus } from "../../../services/whatsapp-templates.service.js";
 
-export async function adminWhatsAppTemplatesRoutes(app: FastifyInstance) {
-  const P = "/admin/comm/whatsapp-templates";
+export async function adminCommTemplatesRoutes(app: FastifyInstance) {
+  const P = "/admin/comm/templates";
 
-  // ── GET /admin/comm/whatsapp-templates ───────────────────
-  // Every catalogue event, joined with this school's status —
-  // NOT_SUBMITTED for anything never synced yet, so the list is
-  // always complete even before the first sync runs.
-  app.get(P, { preHandler: [authenticate] }, async (req: FastifyRequest, rep: FastifyReply) => {
-    const { schoolId } = req.user as any;
+  // ─── LIST TEMPLATES ───────────────────────────────────────
+  app.get(P, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const q = req.query as any;
 
-    const [systemTemplates, statuses] = await Promise.all([
-      prisma.systemWhatsAppTemplate.findMany({ where: { isActive: true }, orderBy: { label: "asc" } }),
-      prisma.schoolWhatsAppTemplateStatus.findMany({ where: { schoolId } }),
-    ]);
-    const statusMap = new Map(statuses.map((s) => [s.systemTemplateId, s]));
+      const templates = await prisma.commTemplate.findMany({
+        where: {
+          schoolId,
+          isActive: true,
+          ...(q.type    ? { type: q.type as any }    : {}),
+          ...(q.channel ? { channels: { has: q.channel as any } } : {}),
+          ...(q.search  ? { name: { contains: q.search, mode: "insensitive" } } : {}),
+        },
+        include: {
+          _count: { select: { versions: true, broadcasts: true } },
+        },
+        orderBy: [{ isDefault: "desc" }, { usageCount: "desc" }],
+      });
 
-    const items = systemTemplates.map((t) => {
-      const s = statusMap.get(t.id);
-      return {
-        eventKey: t.eventKey, label: t.label, description: t.description,
-        placeholderLabels: t.placeholderLabels,
-        status: s?.status ?? "NOT_SUBMITTED",
-        isEnabled: s?.isEnabled ?? false,
-        rejectionReason: s?.rejectionReason ?? null,
-        submittedAt: s?.submittedAt ?? null,
-        approvedAt: s?.approvedAt ?? null,
-        lastCheckedAt: s?.lastCheckedAt ?? null,
-        systemTemplateId: t.id,
-      };
-    });
-
-    const summary = {
-      total: items.length,
-      approved: items.filter((i) => i.status === "APPROVED").length,
-      pending: items.filter((i) => i.status === "PENDING").length,
-      rejected: items.filter((i) => i.status === "REJECTED").length,
-      notSubmitted: items.filter((i) => i.status === "NOT_SUBMITTED").length,
-      enabled: items.filter((i) => i.isEnabled).length,
-    };
-
-    return rep.send({ success: true, data: { items, summary } });
-  });
-
-  // ── POST /admin/comm/whatsapp-templates/sync ─────────────
-  // Checks/submits every catalogue template against this school's
-  // WABA. Safe to call repeatedly — already-tracked templates are
-  // skipped (only NOT_SUBMITTED ones get checked/created).
-  app.post(`${P}/sync`, { preHandler: [authenticate] }, async (req: FastifyRequest, rep: FastifyReply) => {
-    const { schoolId } = req.user as any;
-    const result = await syncSchoolTemplates(schoolId);
-    return rep.send({
-      success: true,
-      message: result.checked === 0
-        ? "No active WhatsApp channel found — set one up first in the Channels tab."
-        : `${result.submitted} submitted, ${result.alreadyThere} already tracked, ${result.failed} failed.`,
-      data: result,
-    });
-  });
-
-  // ── POST /admin/comm/whatsapp-templates/:eventKey/refresh ─
-  app.post(`${P}/:eventKey/refresh`, { preHandler: [authenticate] }, async (req: FastifyRequest, rep: FastifyReply) => {
-    const { schoolId } = req.user as any;
-    const { eventKey } = req.params as { eventKey: string };
-
-    const template = await prisma.systemWhatsAppTemplate.findUnique({ where: { eventKey } });
-    if (!template) return rep.status(404).send({ success: false, message: "Unknown event." });
-
-    const result = await refreshTemplateStatus(schoolId, template.id);
-    return rep.send({ success: result.ok, message: result.ok ? `Status: ${result.status}` : result.error, data: result });
-  });
-
-  // ── PUT /admin/comm/whatsapp-templates/:eventKey/enable ──
-  app.put(`${P}/:eventKey/enable`, { preHandler: [authenticate] }, async (req: FastifyRequest, rep: FastifyReply) => {
-    const { schoolId } = req.user as any;
-    const { eventKey } = req.params as { eventKey: string };
-    const b = req.body as { enabled: boolean };
-
-    const template = await prisma.systemWhatsAppTemplate.findUnique({ where: { eventKey } });
-    if (!template) return rep.status(404).send({ success: false, message: "Unknown event." });
-
-    const row = await prisma.schoolWhatsAppTemplateStatus.findUnique({ where: { schoolId_systemTemplateId: { schoolId, systemTemplateId: template.id } } });
-    if (!row) return rep.status(404).send({ success: false, message: "This template hasn't been submitted yet — run Sync first." });
-    if (b.enabled && row.status !== "APPROVED") {
-      return rep.status(400).send({ success: false, message: `Can't enable — Meta hasn't approved this yet (currently ${row.status}).` });
+      return rep.send({ templates });
     }
+  );
 
-    await prisma.schoolWhatsAppTemplateStatus.update({ where: { id: row.id }, data: { isEnabled: b.enabled } });
-    return rep.send({ success: true, message: b.enabled ? `${template.label} enabled.` : `${template.label} disabled.` });
-  });
+  // ─── GET ONE TEMPLATE ─────────────────────────────────────
+  app.get(`${P}/:id`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const id = Number((req.params as any).id);
+
+      const template = await prisma.commTemplate.findFirst({
+        where: { id, schoolId },
+        include: {
+          versions: { orderBy: { version: "desc" }, take: 10 },
+          _count: { select: { broadcasts: true } },
+        },
+      });
+      if (!template) return rep.code(404).send({ error: "Not found" });
+      return rep.send({ template });
+    }
+  );
+
+  // ─── CREATE TEMPLATE ──────────────────────────────────────
+  app.post(P, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId, userId } = req.user as any;
+      const b = req.body as any;
+
+      // If setting as default for this type, unset existing
+      if (b.isDefault && b.type) {
+        await prisma.commTemplate.updateMany({
+          where: { schoolId, type: b.type as any },
+          data: { isDefault: false },
+        });
+      }
+
+      const template = await prisma.commTemplate.create({
+        data: {
+          schoolId,
+          name:        b.name,
+          type:        b.type as any ?? "GENERAL",
+          subject:     b.subject ?? null,
+          body:        b.body,
+          variables:   b.variables ?? [],
+          channels:    b.channels as any[] ?? [],
+          isDefault:   b.isDefault ?? false,
+          createdById: Number(userId),
+          // ADDED: only meaningful when WHATSAPP is one of the
+          // channels — the Meta Business Manager-approved template
+          // this maps to.
+          metaTemplateName:     b.metaTemplateName ?? null,
+          metaTemplateLanguage: b.metaTemplateLanguage ?? "en",
+        },
+      });
+
+      // Save initial version
+      await prisma.commTemplateVersion.create({
+        data: {
+          templateId:  template.id,
+          schoolId,
+          version:     1,
+          name:        template.name,
+          subject:     template.subject,
+          body:        template.body,
+          variables:   template.variables,
+          changelog:   "Initial version",
+          createdById: Number(userId),
+        },
+      });
+
+      return rep.code(201).send({ template });
+    }
+  );
+
+  // ─── UPDATE TEMPLATE (creates new version) ────────────────
+  app.put(`${P}/:id`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId, userId } = req.user as any;
+      const id = Number((req.params as any).id);
+      const b = req.body as any;
+
+      if (b.isDefault && b.type) {
+        await prisma.commTemplate.updateMany({
+          where: { schoolId, type: b.type as any },
+          data: { isDefault: false },
+        });
+      }
+
+      const template = await prisma.commTemplate.update({
+        where: { id, schoolId },
+        data: {
+          name:      b.name,
+          subject:   b.subject,
+          body:      b.body,
+          variables: b.variables,
+          channels:  b.channels as any[],
+          isDefault: b.isDefault,
+          isActive:  b.isActive,
+          // ADDED — see POST above.
+          metaTemplateName:     b.metaTemplateName,
+          metaTemplateLanguage: b.metaTemplateLanguage,
+        },
+      });
+
+      // Create new version if body changed
+      if (b.body && b.saveVersion !== false) {
+        const vCount = await prisma.commTemplateVersion.count({ where: { templateId: id } });
+        await prisma.commTemplateVersion.create({
+          data: {
+            templateId:  id,
+            schoolId,
+            version:     vCount + 1,
+            name:        b.name ?? template.name,
+            subject:     b.subject ?? null,
+            body:        b.body,
+            variables:   b.variables ?? [],
+            changelog:   b.changelog ?? "Updated",
+            createdById: Number(userId),
+          },
+        });
+      }
+
+      return rep.send({ template });
+    }
+  );
+
+  // ─── SOFT DELETE ──────────────────────────────────────────
+  app.delete(`${P}/:id`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const id = Number((req.params as any).id);
+      await prisma.commTemplate.update({ where: { id, schoolId }, data: { isActive: false } });
+      return rep.send({ ok: true });
+    }
+  );
+
+  // ─── CLONE ────────────────────────────────────────────────
+  app.post(`${P}/:id/clone`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId, userId } = req.user as any;
+      const id = Number((req.params as any).id);
+      const src = await prisma.commTemplate.findFirst({ where: { id, schoolId } });
+      if (!src) return rep.code(404).send({ error: "Not found" });
+
+      const clone = await prisma.commTemplate.create({
+        data: {
+          schoolId,
+          name:        `${src.name} (Copy)`,
+          type:        src.type,
+          subject:     src.subject,
+          body:        src.body,
+          variables:   src.variables,
+          channels:    src.channels,
+          isDefault:   false,
+          createdById: Number(userId),
+        },
+      });
+
+      await prisma.commTemplateVersion.create({
+        data: {
+          templateId: clone.id, schoolId, version: 1,
+          name: clone.name, subject: clone.subject, body: clone.body,
+          variables: clone.variables, changelog: `Cloned from template #${id}`,
+          createdById: Number(userId),
+        },
+      });
+
+      return rep.code(201).send({ template: clone });
+    }
+  );
+
+  // ─── SET DEFAULT FOR TYPE ─────────────────────────────────
+  app.post(`${P}/:id/set-default`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const id = Number((req.params as any).id);
+      const src = await prisma.commTemplate.findFirst({ where: { id, schoolId } });
+      if (!src) return rep.code(404).send({ error: "Not found" });
+
+      await prisma.commTemplate.updateMany({ where: { schoolId, type: src.type }, data: { isDefault: false } });
+      const template = await prisma.commTemplate.update({ where: { id }, data: { isDefault: true } });
+      return rep.send({ template });
+    }
+  );
+
+  // ─── VERSION HISTORY ──────────────────────────────────────
+  app.get(`${P}/:id/versions`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const id = Number((req.params as any).id);
+      const versions = await prisma.commTemplateVersion.findMany({
+        where: { templateId: id, schoolId },
+        orderBy: { version: "desc" },
+      });
+      return rep.send({ versions });
+    }
+  );
+
+  // ─── RESTORE VERSION ──────────────────────────────────────
+  app.post(`${P}/:id/restore/:versionId`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId, userId } = req.user as any;
+      const id        = Number((req.params as any).id);
+      const versionId = Number((req.params as any).versionId);
+
+      const version = await prisma.commTemplateVersion.findFirst({ where: { id: versionId, templateId: id, schoolId } });
+      if (!version) return rep.code(404).send({ error: "Version not found" });
+
+      const template = await prisma.commTemplate.update({
+        where: { id, schoolId },
+        data: { name: version.name, subject: version.subject, body: version.body, variables: version.variables },
+      });
+
+      // Save restore as new version
+      const vCount = await prisma.commTemplateVersion.count({ where: { templateId: id } });
+      await prisma.commTemplateVersion.create({
+        data: {
+          templateId: id, schoolId, version: vCount + 1,
+          name: version.name, subject: version.subject, body: version.body,
+          variables: version.variables, changelog: `Restored from v${version.version}`,
+          createdById: Number(userId),
+        },
+      });
+
+      return rep.send({ template });
+    }
+  );
+
+  // ─── PREVIEW TEMPLATE (resolve variables) ─────────────────
+  app.post(`${P}/:id/preview`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const id = Number((req.params as any).id);
+      const b = req.body as any;
+
+      const template = await prisma.commTemplate.findFirst({ where: { id, schoolId } });
+      if (!template) return rep.code(404).send({ error: "Not found" });
+
+      const sampleData: Record<string, string> = {
+        "{{studentName}}":   b.studentName    ?? "Rahul Sharma",
+        "{{parentName}}":    b.parentName     ?? "Mr. Sharma",
+        "{{class}}":         b.class          ?? "10-A",
+        "{{admissionNo}}":   b.admissionNo    ?? "ADM-2025-001",
+        "{{feeDue}}":        b.feeDue         ?? "₹5,000",
+        "{{dueDate}}":       b.dueDate        ?? "31 July 2025",
+        "{{examDate}}":      b.examDate       ?? "15 Aug 2025",
+        "{{schoolName}}":    b.schoolName     ?? "ShikshaMatrix School",
+        "{{principalName}}": b.principalName  ?? "Dr. Anil Sharma",
+        "{{date}}":          new Date().toLocaleDateString("en-IN"),
+        ...(b.extra ?? {}),
+      };
+
+      let resolvedBody    = template.body;
+      let resolvedSubject = template.subject ?? "";
+      for (const [k, v] of Object.entries(sampleData)) {
+        resolvedBody    = resolvedBody.replaceAll(k, v);
+        resolvedSubject = resolvedSubject.replaceAll(k, v);
+      }
+
+      return rep.send({ resolvedBody, resolvedSubject, sampleData });
+    }
+  );
+
+  // ─── MULTI-CHANNEL PREVIEW (same body → SMS / Email / Push) ─
+  app.post(`${P}/:id/preview-all-channels`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+      const id = Number((req.params as any).id);
+      const template = await prisma.commTemplate.findFirst({ where: { id, schoolId } });
+      if (!template) return rep.code(404).send({ error: "Not found" });
+
+      const preview: Record<string, { subject?: string; body: string; charCount: number }> = {};
+      for (const channel of template.channels) {
+        // SMS: max 160 chars, strip HTML
+        const stripped = template.body.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        const smsBody  = stripped.slice(0, 160);
+        if (channel === "SMS")              preview[channel] = { body: smsBody, charCount: smsBody.length };
+        if (channel === "APP_NOTIFICATION") preview[channel] = { subject: template.subject ?? template.name, body: stripped.slice(0, 200), charCount: stripped.length };
+        if (channel === "EMAIL")            preview[channel] = { subject: template.subject ?? template.name, body: template.body, charCount: template.body.length };
+        if (channel === "WHATSAPP")         preview[channel] = { body: stripped.slice(0, 1024), charCount: Math.min(stripped.length, 1024) };
+      }
+
+      return rep.send({ preview, channels: template.channels });
+    }
+  );
+
+  // ─── TEMPLATE ANALYTICS ───────────────────────────────────
+  app.get(`${P}/analytics/usage`, { preHandler: [authenticate] },
+    async (req: FastifyRequest, rep: FastifyReply) => {
+      const { schoolId } = req.user as any;
+
+      const [typeBreakdown, topUsed, channelBreakdown] = await Promise.all([
+        prisma.commTemplate.groupBy({
+          by: ["type"],
+          where: { schoolId, isActive: true },
+          _count: { id: true },
+          _sum: { usageCount: true },
+          orderBy: { _sum: { usageCount: "desc" } },
+        }),
+        prisma.commTemplate.findMany({
+          where: { schoolId, isActive: true },
+          orderBy: { usageCount: "desc" },
+          take: 5,
+          select: { id: true, name: true, type: true, usageCount: true, channels: true },
+        }),
+        // Channel distribution (flatten channels array)
+        prisma.commTemplate.findMany({
+          where: { schoolId, isActive: true },
+          select: { channels: true },
+        }),
+      ]);
+
+      // Count channel usage
+      const channelCount: Record<string, number> = {};
+      channelBreakdown.forEach(t => {
+        (t.channels as string[]).forEach(ch => {
+          channelCount[ch] = (channelCount[ch] ?? 0) + 1;
+        });
+      });
+
+      return rep.send({ typeBreakdown, topUsed, channelCount });
+    }
+  );
 }
