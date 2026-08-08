@@ -2354,6 +2354,11 @@ enum DayType {
   ACTIVITY
   CUSTOM
 }
+enum FeeInstallmentSource {
+ PLAN
+ TRANSPORT
+}
+
 // ─────────────────────────────────────────
 // PLATFORM LEVEL
 // ─────────────────────────────────────────
@@ -2641,6 +2646,8 @@ model School {
   trialHistory           TrialHistory?
   profileFieldChangeLogs ProfileFieldChangeLog[]
   workingDayOverrides    WorkingDayOverride[]
+  studentTransportAssignments StudentTransportAssignment[]
+
   @@index([status])
   @@index([city, state])
   @@map("schools")
@@ -2707,6 +2714,7 @@ model AcademicYear {
   classTeacherAssignments ClassTeacherAssignment[]
   academicPolicy          AcademicPolicy?
   workingDayOverrides WorkingDayOverride[]
+  studentTransportAssignments StudentTransportAssignment[]
 
   @@unique([schoolId, name])
   @@index([schoolId, isCurrent])
@@ -3036,6 +3044,7 @@ model Student {
   libBookmarks            LibResourceBookmark[]
   libResourceViews        LibResourceView[]
   hostelAllocations       HostelAllocation[]
+  transportAssignments        StudentTransportAssignment[]
 
   certIssued      CertIssued[]     @relation("StudentCerts")
   libIssues       LibIssue[]       @relation("StudentIssues")
@@ -6867,12 +6876,16 @@ model StudentFeeInstallment {
   id            Int                @id @default(autoincrement())
   schoolId      Int
   school        School             @relation(fields: [schoolId], references: [id])
-  studentPlanId Int
-  studentPlan   StudentFeePlan     @relation(fields: [studentPlanId], references: [id], onDelete: Cascade)
-  installmentId Int
-  installment   FeePlanInstallment @relation(fields: [installmentId], references: [id])
+  studentPlanId Int?                   
+  studentPlan   StudentFeePlan? @relation(fields: [studentPlanId], references: [id], onDelete: Cascade)
+  installmentId Int?                    
+  installment   FeePlanInstallment? @relation(fields: [installmentId], references: [id])
   studentId     Int
   student       Student            @relation(fields: [studentId], references: [id])
+  source                FeeInstallmentSource        @default(PLAN)
+  transportAssignmentId Int?
+  transportAssignment   StudentTransportAssignment?  @relation(fields: [transportAssignmentId], references: [id])
+  label                 String?                      @db.VarChar(100)
 
   dueAmount      Decimal              @db.Decimal(12, 2)
   paidAmount     Decimal              @default(0) @db.Decimal(12, 2)
@@ -9551,8 +9564,8 @@ model CommBroadcast {
 // Per-recipient delivery record
 model CommDelivery {
   id            Int                  @id @default(autoincrement())
-  broadcastId   Int
-  broadcast     CommBroadcast        @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  broadcastId   Int?
+  broadcast   CommBroadcast? @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
   userId        Int? // null = external (phone number only)
   phone         String?              @db.VarChar(20)
   email         String?              @db.VarChar(200)
@@ -9567,7 +9580,8 @@ model CommDelivery {
   retryCount    Int                  @default(0)
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
-
+  sourceCategory String? @db.VarChar(30)
+  
   @@index([broadcastId])
   @@index([broadcastId, status])
   @@index([userId])
@@ -9792,6 +9806,8 @@ model CommSettings {
   notifyOnGatewayDown   Boolean  @default(true)
   notifyEmailRecipients String[] @default([])
   lowBalanceThreshold   Int      @default(100) // SMS credits
+  pushNotificationsEnabled     Boolean @default(true)
+  whatsappNotificationsEnabled Boolean @default(false)
 
   // ── Security Settings ────────────────────────────────────────
   antiSpamEnabled           Boolean  @default(true)
@@ -11549,11 +11565,40 @@ model TransportRoute {
 
   stops TransportStop[]
   trips TransportTrip[]
+  studentAssignments StudentTransportAssignment[]
 
   @@unique([schoolId, routeCode])
   @@index([schoolId])
   @@index([schoolId, vehicleId])
   @@map("transport_routes")
+}
+model StudentTransportAssignment {
+  id             Int            @id @default(autoincrement())
+  schoolId       Int
+  school         School         @relation(fields: [schoolId], references: [id])
+
+  studentId      Int
+  student        Student        @relation(fields: [studentId], references: [id])
+
+  routeId        Int
+  route          TransportRoute @relation(fields: [routeId], references: [id])
+
+  stopId         Int
+  stop           TransportStop  @relation(fields: [stopId], references: [id])
+
+  academicYearId Int
+  academicYear   AcademicYear   @relation(fields: [academicYearId], references: [id])
+
+  isActive       Boolean        @default(true)
+  assignedAt     DateTime       @default(now())
+  removedAt      DateTime?
+
+  installments   StudentFeeInstallment[]
+
+  @@index([schoolId])
+  @@index([studentId])
+  @@index([stopId, isActive])
+  @@map("student_transport_assignments")
 }
 
 model TransportStop {
@@ -11571,6 +11616,10 @@ model TransportStop {
   isActive     Boolean        @default(true)
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
+  feeAmount    Decimal?     @db.Decimal(10, 2)
+  feeFrequency FeeFrequency @default(MONTHLY)
+
+  studentAssignments StudentTransportAssignment[]
 
   @@index([routeId])
   @@index([routeId, sequence])

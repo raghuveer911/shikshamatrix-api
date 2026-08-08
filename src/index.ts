@@ -258,7 +258,10 @@ import { adminPromoteInsightRoutes } from "./routes/admin/academics/promote-insi
 import { adminSectionTransferInsightRoutes } from "./routes/admin/academics/section-transfer-insights.js";
 import { adminClassTeacherInsightRoutes } from "./routes/admin/academics/class-teacher-insights.js";
 import { adminAcademicPolicyInsightRoutes } from "./routes/admin/academics/academic-policies-insights.js";
-
+import { adminHostelRoomsInsightRoutes } from "./routes/admin/hostel/hostel-rooms-insights.js";
+import { adminHostelAllocationInsightRoutes } from "./routes/admin/hostel/hostel-allocation-insights.js";
+import { adminHostelHostelsInsightRoutes } from "./routes/admin/hostel/hostel-hostels-insights.js";
+import { adminTransportFeesRoutes } from "./routes/admin/finance/transport-fees.js";
 async function buildApp() {
   const app = Fastify({ logger: false });
 
@@ -271,6 +274,10 @@ async function buildApp() {
   });
 
   // Routes
+  await app.register(adminTransportFeesRoutes);
+  await app.register(adminHostelHostelsInsightRoutes);
+  await app.register(adminHostelRoomsInsightRoutes);
+  await app.register(adminHostelAllocationInsightRoutes);
   await app.register(adminClassInsightRoutes);
   await app.register(adminTimetableInsightRoutes);
   await app.register(adminStreamsSubjectsInsightRoutes);

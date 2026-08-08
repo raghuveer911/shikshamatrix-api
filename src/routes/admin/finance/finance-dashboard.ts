@@ -85,13 +85,13 @@ export async function adminFinanceDashboardRoutes(app: FastifyInstance) {
         // FIXED: total still owed across every unpaid/partial installment —
         // this is the real "Fees Pending" figure, not Invoice.dueAmount.
         safe(() => prisma.studentFeeInstallment.aggregate({
-          where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, studentPlan: { isActive: true } },
+          where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, OR: [{ studentPlan: { isActive: true } }, { source: "TRANSPORT" as any }] },
           _sum: { dueAmount: true, paidAmount: true, fineAmount: true, discountAmount: true },
         }), { _sum: { dueAmount: null, paidAmount: null, fineAmount: null, discountAmount: null } } as any),
 
         // FIXED: overdue = past due date and not fully settled — same source.
         safe(() => prisma.studentFeeInstallment.aggregate({
-          where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, dueDate: { lt: now }, studentPlan: { isActive: true } },
+          where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, dueDate: { lt: now }, OR: [{ studentPlan: { isActive: true } }, { source: "TRANSPORT" as any }] },
           _sum: { dueAmount: true, paidAmount: true, fineAmount: true, discountAmount: true },
         }), { _sum: { dueAmount: null, paidAmount: null, fineAmount: null, discountAmount: null } } as any),
 
@@ -100,7 +100,7 @@ export async function adminFinanceDashboardRoutes(app: FastifyInstance) {
         // than "3 installments", and matches how the banner phrases it.
         safe(async () => {
           const rows = await prisma.studentFeeInstallment.findMany({
-            where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, dueDate: { lt: now }, studentPlan: { isActive: true } },
+            where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, dueDate: { lt: now }, OR: [{ studentPlan: { isActive: true } }, { source: "TRANSPORT" as any }] },
             select: { studentId: true }, distinct: ["studentId"],
           });
           return rows.length;
@@ -108,7 +108,7 @@ export async function adminFinanceDashboardRoutes(app: FastifyInstance) {
 
         safe(async () => {
           const rows = await prisma.studentFeeInstallment.findMany({
-            where: { schoolId, status: { in: ["PENDING","PARTIAL"] }, studentPlan: { isActive: true } },
+            where: { schoolId, status: { in: ["PENDING","PARTIAL"] }, OR: [{ studentPlan: { isActive: true } }, { source: "TRANSPORT" as any }] },
             select: { studentId: true }, distinct: ["studentId"],
           });
           return rows.length;
@@ -177,8 +177,9 @@ export async function adminFinanceDashboardRoutes(app: FastifyInstance) {
               SUM(GREATEST(0, sfi."dueAmount" + sfi."fineAmount" - sfi."discountAmount" - sfi."paidAmount")) AS due
             FROM student_fee_installments sfi
             JOIN students s ON s.id = sfi."studentId"
-            JOIN student_fee_plans sfp ON sfp.id = sfi."studentPlanId" AND sfp."isActive" = true
+            LEFT JOIN student_fee_plans sfp ON sfp.id = sfi."studentPlanId"
             WHERE sfi."schoolId" = ${schoolId} AND sfi.status IN ('PENDING','PARTIAL','OVERDUE')
+              AND (sfp."isActive" = true OR sfi.source = 'TRANSPORT')
             GROUP BY s."classId"
           ) inst ON inst."classId" = c.id
           WHERE c."schoolId" = ${schoolId} AND c."isActive" = true
@@ -190,7 +191,7 @@ export async function adminFinanceDashboardRoutes(app: FastifyInstance) {
         Promise.all([
           safe(async () => {
             const rows = await prisma.studentFeeInstallment.findMany({
-              where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, dueDate: { lt: now }, studentPlan: { isActive: true } },
+              where: { schoolId, status: { in: ["PENDING","PARTIAL","OVERDUE"] }, dueDate: { lt: now }, OR: [{ studentPlan: { isActive: true } }, { source: "TRANSPORT" as any }] },
               select: { studentId: true }, distinct: ["studentId"],
             });
             return rows.length;
@@ -210,7 +211,7 @@ export async function adminFinanceDashboardRoutes(app: FastifyInstance) {
         const [col, pen] = await Promise.all([
           safe(() => prisma.payment.aggregate({ where: { invoice: { schoolId }, paidAt: { gte: d1, lt: d2 } }, _sum: { amount: true } }), { _sum: { amount: null } } as any),
           safe(() => prisma.studentFeeInstallment.aggregate({
-            where: { schoolId, dueDate: { gte: d1, lt: d2 }, studentPlan: { isActive: true } },
+            where: { schoolId, dueDate: { gte: d1, lt: d2 }, OR: [{ studentPlan: { isActive: true } }, { source: "TRANSPORT" as any }] },
             _sum: { dueAmount: true, paidAmount: true, fineAmount: true, discountAmount: true },
           }), { _sum: { dueAmount: null, paidAmount: null, fineAmount: null, discountAmount: null } } as any),
         ]);
@@ -272,7 +273,10 @@ export async function adminFinanceDashboardRoutes(app: FastifyInstance) {
           safe(() => prisma.studentFeeInstallment.aggregate({
             where: {
               schoolId, student: { classId: cls.id }, status: { in: ["PENDING","PARTIAL","OVERDUE"] },
-              studentPlan: { isActive: true, ...(q.academicYearId ? { academicYearId: parseInt(q.academicYearId) } : {}) },
+              OR: [
+                { studentPlan: { isActive: true, ...(q.academicYearId ? { academicYearId: parseInt(q.academicYearId) } : {}) } },
+                { source: "TRANSPORT" as any, ...(q.academicYearId ? { transportAssignment: { academicYearId: parseInt(q.academicYearId) } } : {}) },
+              ],
             },
             _sum: { dueAmount: true, paidAmount: true, fineAmount: true, discountAmount: true },
           }), { _sum: { dueAmount: null, paidAmount: null, fineAmount: null, discountAmount: null } } as any),

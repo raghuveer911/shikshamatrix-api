@@ -4,6 +4,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { prisma } from "../../../lib/prisma.js";
 import { authenticate } from "../../../middleware/authenticate.js";
+import { testWhatsAppConnection } from "../../../services/whatsapp.service.js";
 
 export async function adminCommSettingsRoutes(app: FastifyInstance) {
   const P = "/admin/comm/settings";
@@ -33,6 +34,10 @@ export async function adminCommSettingsRoutes(app: FastifyInstance) {
           defaultTimezone: b.defaultTimezone,
           academicYearAuto: b.academicYearAuto,
           channelPriority: b.channelPriority,
+          // ADDED: the two toggles that replace the old Settings →
+          // Notifications page (4 toggles → 2, centralized here).
+          pushNotificationsEnabled: b.pushNotificationsEnabled,
+          whatsappNotificationsEnabled: b.whatsappNotificationsEnabled,
         },
       });
       return rep.send({ settings: s });
@@ -286,9 +291,21 @@ export async function adminCommSettingsRoutes(app: FastifyInstance) {
       const { schoolId } = req.user as any;
       const id = Number((req.params as any).id);
 
-      // Simulate test — in production, call actual gateway
-      const isOk = Math.random() > 0.1; // 90% success simulation
-      const error = isOk ? null : "Connection timeout — check API key or host";
+      const config = await prisma.commChannelConfig.findFirst({ where: { id, schoolId } });
+      if (!config) return rep.status(404).send({ ok: false, error: "Channel not found." });
+
+      // FIXED: was `Math.random() > 0.1` — a fake 90%-success coin
+      // flip that never actually reached a provider. WhatsApp now
+      // gets a real credential check against Meta's Graph API; SMS
+      // and Email aren't wired to a real gateway yet, so they still
+      // report an honest "not implemented" rather than pretending.
+      let isOk = false;
+      let error: string | null = "Testing isn't wired up for this channel type yet.";
+      if (config.type === "WHATSAPP_API") {
+        const result = await testWhatsAppConnection(schoolId, id);
+        isOk = result.ok;
+        error = result.ok ? null : (result.error ?? "Connection failed.");
+      }
 
       await prisma.commChannelConfig.update({
         where: { id, schoolId },

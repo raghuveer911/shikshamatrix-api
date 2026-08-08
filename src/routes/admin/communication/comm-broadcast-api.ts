@@ -5,6 +5,8 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { prisma } from "../../../lib/prisma.js";
 import { authenticate } from "../../../middleware/authenticate.js";
 import { fanOutNotification } from "../../../services/notification-fanout.service.js";
+import { sendWhatsAppMessage } from "../../../services/whatsapp.service.js";
+import { resolveAudienceUserIds } from "../../../services/audience.service.js";
 
 export async function adminCommBroadcastRoutes(app: FastifyInstance) {
   const P = "/admin/comm/broadcasts";
@@ -269,21 +271,61 @@ export async function adminCommBroadcastRoutes(app: FastifyInstance) {
         });
       }
 
-      // Other channels (SMS/EMAIL/WHATSAPP) still need a real gateway —
-      // in production a job queue would pick those up here. APP_NOTIFICATION
-      // delivery above is real; these stats reflect that channel's actual
-      // fan-out count, other channels remain simulated until wired up.
+      // ── WhatsApp — real send via Meta Cloud API. Meta requires a
+      // pre-approved template for anything the school initiates (a
+      // broadcast is always school-initiated, never a reply), so this
+      // reads a Meta template name out of the broadcast's WhatsApp
+      // content block rather than sending the typed body as free
+      // text — free text would be rejected by Meta outside an active
+      // 24h customer-service window. If no template name was set,
+      // this channel is skipped with a clear failure reason logged
+      // per recipient rather than silently pretending to send.
+      let whatsappSent = 0;
+      if ((broadcast.channels as string[]).includes("WHATSAPP")) {
+        const waContent = (broadcast.content as any)?.WHATSAPP ?? {};
+        const recipientIds = await resolveAudienceUserIds(schoolId, {
+          audienceType: broadcast.audienceType, targetClassIds: broadcast.targetClassIds, targetUserIds: broadcast.targetUserIds,
+        });
+        const recipients = await prisma.user.findMany({ where: { id: { in: recipientIds }, phone: { not: null } }, select: { id: true, phone: true } });
+        for (const r of recipients) {
+          if (!r.phone) continue;
+          let result: { ok: boolean; error?: string };
+          if (waContent.metaTemplateName) {
+            result = await sendWhatsAppMessage({
+              schoolId, to: r.phone, userId: r.id, mode: "TEMPLATE", broadcastId: broadcast.id,
+              templateName: waContent.metaTemplateName, templateLanguage: waContent.metaTemplateLanguage, templateParams: waContent.metaTemplateParams,
+            });
+          } else {
+            // No Meta template configured — log the failure honestly
+            // rather than either faking success or burning a real API
+            // call with empty text.
+            await prisma.commDelivery.create({
+              data: {
+                broadcastId: broadcast.id, userId: r.id, phone: r.phone, channel: "WHATSAPP", status: "FAILED",
+                failedAt: new Date(), failureReason: "No Meta template name set on this broadcast's WhatsApp content — free text isn't allowed for business-initiated messages.",
+              },
+            });
+            result = { ok: false };
+          }
+          if (result.ok) whatsappSent++;
+        }
+      }
+
+      // SMS/EMAIL still need a real gateway wired up (not built yet,
+      // out of scope for now) — those channels stay simulated in the
+      // stats below until that happens. APP_NOTIFICATION and WHATSAPP
+      // above are both real.
       await prisma.commBroadcast.update({
         where: { id },
         data: {
           status:        "SENT",
-          sentCount:     Math.max(notifiedCount, broadcast.totalRecipients),
-          deliveredCount: notifiedCount || Math.round(broadcast.totalRecipients * 0.97),
-          failedCount:   notifiedCount ? 0 : Math.round(broadcast.totalRecipients * 0.03),
+          sentCount:     Math.max(notifiedCount, whatsappSent, broadcast.totalRecipients),
+          deliveredCount: notifiedCount || whatsappSent || Math.round(broadcast.totalRecipients * 0.97),
+          failedCount:   (notifiedCount || whatsappSent) ? 0 : Math.round(broadcast.totalRecipients * 0.03),
         },
       });
 
-      return rep.send({ broadcast: { ...broadcast, status: "SENT" }, notifiedCount, message: "Broadcast sent" });
+      return rep.send({ broadcast: { ...broadcast, status: "SENT" }, notifiedCount, whatsappSent, message: "Broadcast sent" });
     }
   );
 

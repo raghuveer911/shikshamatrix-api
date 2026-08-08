@@ -122,7 +122,7 @@ export async function adminTransportRoutesRoutes(app: FastifyInstance) {
     if (b.sequence !== undefined) {
       await prisma.transportStop.updateMany({ where: { routeId: id, sequence: { gte: seq } }, data: { sequence: { increment: 1 } } });
     }
-    const stop = await prisma.transportStop.create({ data: { routeId: id, stopName: b.stopName, landmark: b.landmark ?? null, sequence: seq, latitude: b.latitude ? Number(b.latitude) : null, longitude: b.longitude ? Number(b.longitude) : null, pickupTime: b.pickupTime ?? null, dropTime: b.dropTime ?? null } });
+    const stop = await prisma.transportStop.create({ data: { routeId: id, stopName: b.stopName, landmark: b.landmark ?? null, sequence: seq, latitude: b.latitude ? Number(b.latitude) : null, longitude: b.longitude ? Number(b.longitude) : null, pickupTime: b.pickupTime ?? null, dropTime: b.dropTime ?? null, feeAmount: b.feeAmount !== undefined ? Number(b.feeAmount) : null, feeFrequency: b.feeFrequency ?? "MONTHLY" } });
     return rep.code(201).send({ stop });
   });
 
@@ -132,7 +132,7 @@ export async function adminTransportRoutesRoutes(app: FastifyInstance) {
     const b      = req.body as any;
     const stop = await prisma.transportStop.update({
       where: { id: stopId },
-      data: { stopName: b.stopName, landmark: b.landmark, sequence: b.sequence ? Number(b.sequence) : undefined, latitude: b.latitude ? Number(b.latitude) : undefined, longitude: b.longitude ? Number(b.longitude) : undefined, pickupTime: b.pickupTime, dropTime: b.dropTime, isActive: b.isActive },
+      data: { stopName: b.stopName, landmark: b.landmark, sequence: b.sequence ? Number(b.sequence) : undefined, latitude: b.latitude ? Number(b.latitude) : undefined, longitude: b.longitude ? Number(b.longitude) : undefined, pickupTime: b.pickupTime, dropTime: b.dropTime, isActive: b.isActive, feeAmount: b.feeAmount !== undefined ? Number(b.feeAmount) : undefined, feeFrequency: b.feeFrequency },
     });
     return rep.send({ stop });
   });

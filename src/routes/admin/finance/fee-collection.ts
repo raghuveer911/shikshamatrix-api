@@ -141,7 +141,7 @@ export async function adminFeeCollectionRoutes(app: FastifyInstance) {
         }), null);
 
       // ── Reference data (fines, discounts, refunds, past receipts) ──
-      const [discounts, fines, refunds, pastReceipts] = await Promise.all([
+      const [discounts, fines, refunds, pastReceipts, transportInstallments] = await Promise.all([
         safe("discounts", () => prisma.feeDiscount.findMany({ where: { studentId: sid, schoolId, isActive: true } }), [] as any[]),
         safe("fines", () => prisma.feeFine.findMany({ where: { studentId: sid, schoolId, isPaid: false } }), [] as any[]),
         safe("refunds", () => prisma.feeRefund.findMany({ where: { studentId: sid, schoolId, status: { not: "REJECTED" } }, orderBy: { createdAt: "desc" }, take: 3 }), [] as any[]),
@@ -149,22 +149,49 @@ export async function adminFeeCollectionRoutes(app: FastifyInstance) {
           where: { studentId: sid, schoolId, isVoid: false }, orderBy: { createdAt: "desc" }, take: 5,
           select: { id: true, receiptNo: true, amount: true, createdAt: true },
         }), [] as any[]),
+        // ADDED: transport installments don't hang off a StudentFeePlan
+        // (source: TRANSPORT rows have studentPlanId: null), so they
+        // need their own fetch and get merged into the same list below
+        // — the collector sees one unified dues list, tuition and
+        // transport together, and can select across both freely.
+        safe("transport installments", () => prisma.studentFeeInstallment.findMany({
+          where: { studentId: sid, schoolId, source: "TRANSPORT" as any },
+          orderBy: { dueDate: "asc" },
+        }), [] as any[]),
       ]);
 
-      const installments = (studentPlan?.installments ?? []).map((i: any) => ({
+      const planInstallments = (studentPlan?.installments ?? []).map((i: any) => ({
         id: i.id, name: i.installment.name, installmentNo: i.installment.installmentNo,
         dueDate: i.dueDate, dueAmount: i.dueAmount, paidAmount: i.paidAmount,
         fineAmount: i.fineAmount, discountAmount: i.discountAmount,
         netDue: Math.max(0, Number(i.dueAmount) + Number(i.fineAmount) - Number(i.discountAmount) - Number(i.paidAmount)),
         status: i.status, isOverdue: i.status !== "PAID" && i.status !== "WAIVED" && new Date(i.dueDate) < new Date(),
+        source: "PLAN",
       }));
+      const transportInstallmentRows = transportInstallments.map((i: any) => ({
+        id: i.id, name: i.label ?? "Transport Fee", installmentNo: null,
+        dueDate: i.dueDate, dueAmount: i.dueAmount, paidAmount: i.paidAmount,
+        fineAmount: i.fineAmount, discountAmount: i.discountAmount,
+        netDue: Math.max(0, Number(i.dueAmount) + Number(i.fineAmount) - Number(i.discountAmount) - Number(i.paidAmount)),
+        status: i.status, isOverdue: i.status !== "PAID" && i.status !== "WAIVED" && new Date(i.dueDate) < new Date(),
+        source: "TRANSPORT",
+      }));
+      const installments = [...planInstallments, ...transportInstallmentRows].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+
+      const transportTotals = transportInstallmentRows.reduce((acc, i) => ({
+        due: acc.due + Number(i.dueAmount), paid: acc.paid + Number(i.paidAmount), net: acc.net + i.netDue,
+      }), { due: 0, paid: 0, net: 0 });
 
       const summary = studentPlan ? {
         planName: studentPlan.plan.name,
-        totalFee: Number(studentPlan.totalAmount), totalPaid: Number(studentPlan.paidAmount),
-        totalDue: Number(studentPlan.dueAmount), totalFine: Number(studentPlan.fineAmount),
-        totalDiscount: Number(studentPlan.discountAmount),
-      } : { planName: null, totalFee: 0, totalPaid: 0, totalDue: 0, totalFine: 0, totalDiscount: 0 };
+        totalFee: Number(studentPlan.totalAmount) + transportTotals.due,
+        totalPaid: Number(studentPlan.paidAmount) + transportTotals.paid,
+        totalDue: Number(studentPlan.dueAmount) + transportTotals.net,
+        totalFine: Number(studentPlan.fineAmount), totalDiscount: Number(studentPlan.discountAmount),
+      } : {
+        planName: null, totalFee: transportTotals.due, totalPaid: transportTotals.paid,
+        totalDue: transportTotals.net, totalFine: 0, totalDiscount: 0,
+      };
 
       return reply.send({
         success: true,
@@ -177,7 +204,7 @@ export async function adminFeeCollectionRoutes(app: FastifyInstance) {
           },
           studentPlanId: studentPlan?.id ?? null,
           summary, installments, discounts, fines, refunds, pastReceipts,
-          noPlanAssigned: !studentPlan,
+          noPlanAssigned: !studentPlan && transportInstallmentRows.length === 0,
         },
       });
     }

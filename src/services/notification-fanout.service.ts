@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { resolveAudienceUserIds, AudienceInput } from "./audience.service.js";
 import { sendPushNotifications } from "./push-notification.service.js";
+import { sendWhatsAppMessage } from "./whatsapp.service.js";
 
 export interface FanOutInput extends AudienceInput {
   schoolId: number;
@@ -15,6 +16,14 @@ export interface FanOutInput extends AudienceInput {
    *  notification list/bell can redirect on click, and passed through
    *  to the push payload so the mobile app can deep-link on tap too. */
   actionUrl?: string | null;
+  /** ADDED: WhatsApp only sends if this is provided. Free text is NOT
+   *  an option here — Meta requires a pre-approved message template
+   *  for anything the school initiates (this is always
+   *  business-initiated, never a reply), so there's no free-text
+   *  fallback to silently degrade to. Omit this and WhatsApp is
+   *  simply skipped for the call, same as if the school hasn't
+   *  turned WhatsApp on at all. */
+  whatsappTemplate?: { name: string; language?: string; params?: string[] } | null;
 }
 
 // Returns the number of recipients notified. Silently notifies zero people
@@ -44,13 +53,32 @@ export async function fanOutNotification(input: FanOutInput): Promise<number> {
     })),
   });
 
-  // Real OS-level push — reaches the device even if the app is closed.
-  // Runs after the in-app rows are safely created; a push failure never
-  // undoes or blocks the notification actually existing in the inbox.
-  sendPushNotifications(userIds, input.title, input.body, {
-    sourceType: input.sourceType, sourceId: input.sourceId, category: input.category,
-    actionUrl: input.actionUrl ?? null,
-  }).catch((err) => console.log("[fanOutNotification] push send failed:", err?.message ?? err));
+  // ── Push — respects the school's master on/off switch, default on ──
+  const commSettings = await prisma.commSettings.findUnique({ where: { schoolId: input.schoolId } }).catch(() => null);
+  const pushOn = commSettings?.pushNotificationsEnabled ?? true;
+  if (pushOn) {
+    sendPushNotifications(userIds, input.title, input.body, {
+      sourceType: input.sourceType, sourceId: input.sourceId, category: input.category,
+      actionUrl: input.actionUrl ?? null,
+    }).catch((err) => console.log("[fanOutNotification] push send failed:", err?.message ?? err));
+  }
+
+  // ── WhatsApp — only when the school has it on AND the caller gave
+  // an approved template. Runs in the background; never blocks or
+  // fails the rest of the notification. ──
+  if (input.whatsappTemplate && commSettings?.whatsappNotificationsEnabled) {
+    (async () => {
+      const recipients = await prisma.user.findMany({ where: { id: { in: userIds }, phone: { not: null } }, select: { id: true, phone: true } });
+      for (const r of recipients) {
+        if (!r.phone) continue;
+        await sendWhatsAppMessage({
+          schoolId: input.schoolId, to: r.phone, userId: r.id, mode: "TEMPLATE",
+          templateName: input.whatsappTemplate!.name, templateLanguage: input.whatsappTemplate!.language,
+          templateParams: input.whatsappTemplate!.params, sourceCategory: input.category,
+        }).catch((err) => console.log("[fanOutNotification] whatsapp send failed:", err?.message ?? err));
+      }
+    })();
+  }
 
   return userIds.length;
 }

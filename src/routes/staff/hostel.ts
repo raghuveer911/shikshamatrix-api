@@ -18,6 +18,12 @@ async function syncRoomAndHostelCounts(roomId: number) {
   }
 }
 
+// ADDED: wardens could only view rooms/residents and allocate new
+// students from the app — they had no way to flag a room out of use
+// or check a resident out without switching to the web admin. These
+// three mirror the admin capabilities, scoped the same way
+// (hostel.core) since that's already the gate on every route here.
+
 export async function staffHostelRoutes(app: FastifyInstance) {
   const P = "/staff/hostel";
 
@@ -42,7 +48,7 @@ export async function staffHostelRoutes(app: FastifyInstance) {
       const { schoolId } = req as any;
       const hostels = await prisma.hostel.findMany({
         where: { schoolId, isActive: true }, orderBy: { name: "asc" },
-        include: { warden: { include: { user: { select: { name: true, phone: true } } } }, _count: { select: { rooms: true } } },
+        include: { warden: { include: { user: { select: { name: true, phone: true } } } }, _count: { select: { rooms: true, floors: true } } },
       });
       return reply.send({ success: true, data: { hostels } });
     }
@@ -77,7 +83,7 @@ export async function staffHostelRoutes(app: FastifyInstance) {
 
       const rooms = await prisma.hostelRoom.findMany({
         where, orderBy: [{ hostelId: "asc" }, { roomNumber: "asc" }],
-        include: { hostel: { select: { name: true } }, roomType: { select: { name: true } } },
+        include: { hostel: { select: { name: true } }, floor: { select: { floorName: true } }, roomType: { select: { name: true } } },
       });
       return reply.send({ success: true, data: { rooms } });
     }
@@ -205,6 +211,60 @@ export async function staffHostelRoutes(app: FastifyInstance) {
       await syncRoomAndHostelCounts(Number(b.roomId));
 
       return reply.status(201).send({ success: true, message: "Student allocated successfully.", data: { allocation } });
+    }
+  );
+
+  // ── POST /staff/hostel/rooms/:id/maintenance ─────────────
+  // ADDED — a warden checking a room in person can now flag it
+  // right there instead of remembering to tell the office.
+  app.post(`${P}/rooms/:id/maintenance`, { preHandler: [appAuth, requireCapability("hostel.core")] },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const { id } = req.params as { id: string };
+      const b = (req.body ?? {}) as { note?: string };
+      const room = await prisma.hostelRoom.findFirst({ where: { id: Number(id) }, include: { beds: true } });
+      if (!room) return reply.status(404).send({ success: false, message: "Room not found." });
+      if (room.beds.some((bd) => bd.status === "OCCUPIED")) {
+        return reply.status(400).send({ success: false, message: "This room still has residents — vacate them first." });
+      }
+      const updated = await prisma.hostelRoom.update({ where: { id: Number(id) }, data: { status: "MAINTENANCE", maintenanceNote: b.note ?? "Under maintenance" } });
+      return reply.send({ success: true, message: "Room flagged for maintenance.", data: { room: updated } });
+    }
+  );
+
+  // ── POST /staff/hostel/rooms/:id/clear-maintenance ───────
+  app.post(`${P}/rooms/:id/clear-maintenance`, { preHandler: [appAuth, requireCapability("hostel.core")] },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const { id } = req.params as { id: string };
+      const room = await prisma.hostelRoom.findFirst({ where: { id: Number(id) }, include: { beds: true } });
+      if (!room) return reply.status(404).send({ success: false, message: "Room not found." });
+      const occupied = room.beds.filter((bd) => bd.status === "OCCUPIED").length;
+      const status: any = occupied === 0 ? "AVAILABLE" : occupied >= room.capacity ? "OCCUPIED" : "PARTIAL";
+      const updated = await prisma.hostelRoom.update({ where: { id: Number(id) }, data: { status, maintenanceNote: null } });
+      return reply.send({ success: true, message: "Cleared — room is back in use.", data: { room: updated } });
+    }
+  );
+
+  // ── POST /staff/hostel/allocations/:id/vacate ────────────
+  // ADDED — a warden can now check a resident out from the room
+  // screen itself, same effect as the admin's vacate action.
+  app.post(`${P}/allocations/:id/vacate`, { preHandler: [appAuth, requireCapability("hostel.core")] },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const { schoolId } = req as any;
+      const { id } = req.params as { id: string };
+      const b = req.body as { reason: string; note?: string };
+      if (!b.reason) return reply.status(400).send({ success: false, message: "Pick a reason." });
+
+      const alloc = await prisma.hostelAllocation.findFirst({ where: { id: Number(id), schoolId, status: "ACTIVE" } });
+      if (!alloc) return reply.status(404).send({ success: false, message: "Active allocation not found." });
+
+      await prisma.hostelAllocation.update({
+        where: { id: Number(id) },
+        data: { status: "VACATED", vacateDate: new Date(), vacateReason: b.reason as any, vacateNote: b.note ?? null },
+      });
+      await prisma.hostelBed.update({ where: { id: alloc.bedId }, data: { status: "AVAILABLE" } });
+      await syncRoomAndHostelCounts(alloc.roomId);
+
+      return reply.send({ success: true, message: "Resident checked out." });
     }
   );
 }
