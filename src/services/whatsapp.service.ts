@@ -38,8 +38,13 @@ async function getActiveWhatsAppConfig(schoolId: number): Promise<WhatsAppCreden
   });
   if (!config) return null;
   const cfg = config.config as any;
-  if (!cfg?.accessToken || !cfg?.phoneNumberId) return null;
-  return { accessToken: cfg.accessToken, phoneNumberId: cfg.phoneNumberId, businessAccountId: cfg.businessAccountId };
+  // FIXED: the config JSON stores the token under key `apiKey`
+  // (matches the frontend's CHANNEL_FORM_FIELDS and the schema
+  // comment `// WhatsApp: {apiKey, phoneNumberId, businessAccountId}`)
+  // — this was reading `cfg.accessToken`, a key that never existed,
+  // so a fully and correctly filled-in config still failed here.
+  if (!cfg?.apiKey || !cfg?.phoneNumberId) return null;
+  return { accessToken: cfg.apiKey, phoneNumberId: cfg.phoneNumberId, businessAccountId: cfg.businessAccountId };
 }
 
 function normalizePhone(phone: string): string {
@@ -158,11 +163,11 @@ export async function testWhatsAppConnection(schoolId: number, configId: number)
   if (!config) return { ok: false, error: "Channel not found." };
 
   const cfg = config.config as any;
-  if (!cfg?.accessToken || !cfg?.phoneNumberId) return { ok: false, error: "Access token and Phone Number ID are both required." };
+  if (!cfg?.apiKey || !cfg?.phoneNumberId) return { ok: false, error: "Access token and Phone Number ID are both required." };
 
   try {
     const res = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/${cfg.phoneNumberId}?fields=verified_name,display_phone_number`, {
-      headers: { Authorization: `Bearer ${cfg.accessToken}` },
+      headers: { Authorization: `Bearer ${cfg.apiKey}` },
     });
     const json: any = await res.json();
     if (!res.ok || json.error) return { ok: false, error: json.error?.message ?? `HTTP ${res.status}` };
